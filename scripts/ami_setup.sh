@@ -77,7 +77,7 @@ cd /tmp
 if [ -d "criu-s3" ]; then
     rm -rf criu-s3
 fi
-git clone https://github.com/ddps-lab/criu-s3.git
+git clone -b experiment-v2 https://github.com/ddps-lab/criu-s3.git
 cd criu-s3
 make clean || true
 make -j$(nproc)
