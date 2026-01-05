@@ -96,6 +96,10 @@ resource "aws_instance" "bastion_ec2" {
   %{ else }
   echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
   %{ endif }
+
+  # Update criu_workload repo
+  cd /opt/criu_workload && git pull origin main || true
+  chown -R $USERNAME:$USERNAME /opt/criu_workload
   EOF
 
   depends_on = [ aws_instance.az_a_ec2, aws_instance.az_c_ec2, module.efs ]
@@ -166,6 +170,10 @@ resource "aws_instance" "az_a_ec2" {
   %{ else }
   echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
   %{ endif }
+
+  # Update criu_workload repo
+  cd /opt/criu_workload && git pull origin main || true
+  chown -R $USERNAME:$USERNAME /opt/criu_workload
   EOF
 
   depends_on = [ module.efs ]
@@ -236,6 +244,10 @@ resource "aws_instance" "az_c_ec2" {
   %{ else }
   echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
   %{ endif }
+
+  # Update criu_workload repo
+  cd /opt/criu_workload && git pull origin main || true
+  chown -R $USERNAME:$USERNAME /opt/criu_workload
   EOF
 
   depends_on = [ module.efs ]
