@@ -1,0 +1,73 @@
+# CRIU Workload Terraform Variables
+# Copy this file to variables.tf and customize for your environment
+
+variable "prefix" {
+  description = "Prefix for resource names"
+  default = "criu-workload"
+}
+
+variable "region" {
+  description = "AWS region"
+  default = "us-west-2"
+}
+
+variable "awscli_profile" {
+  description = "AWS CLI profile name"
+  default = "default"
+}
+
+variable "key_name" {
+  description = "EC2 key pair name for SSH access"
+  # No default - must be specified
+}
+
+variable "instance_type" {
+  description = "EC2 instance type for workload nodes"
+  default = "m5.4xlarge"
+}
+
+variable "enable_ephemeral_block_device" {
+  description = "Enable ephemeral storage (for instance types with NVMe)"
+  default = false
+}
+
+variable "criu_bucket" {
+  description = "S3 bucket for CRIU checkpoint data"
+  # No default - must be specified
+}
+
+variable "ami_id" {
+  description = "AMI ID for EC2 instances (use custom AMI with CRIU pre-installed via ami_setup.sh)"
+  type        = string
+  # No default - must be specified explicitly
+}
+
+variable "az_a_ec2_count" {
+  description = "Number of EC2 instances in AZ-A"
+  default = 1
+}
+
+variable "az_c_ec2_count" {
+  description = "Number of EC2 instances in AZ-C"
+  default = 0
+}
+
+variable "enable_efs_module" {
+  description = "Enable EFS for shared storage"
+  default = false
+}
+
+variable "ebs_volume_size" {
+  description = "EBS volume size in GB"
+  default = 50
+}
+
+variable "az_a_volume_count" {
+  description = "Number of EBS volumes in AZ-A"
+  default = 0
+}
+
+variable "az_c_volume_count" {
+  description = "Number of EBS volumes in AZ-C"
+  default = 0
+}

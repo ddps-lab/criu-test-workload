@@ -28,10 +28,11 @@ results/
 # Local config (contains real IPs)
 config/servers.yaml
 
-# Terraform state (if aws-lab included)
+# Terraform state and local config
 *.tfstate
 *.tfstate.backup
 .terraform/
+aws-lab/IaC/variables.tf
 
 # SSH keys (should never be committed)
 *.pem
