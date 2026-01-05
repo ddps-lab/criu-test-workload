@@ -1,0 +1,35 @@
+# Lazy Pages Experiment Configuration
+# ====================================
+# Tests CRIU migration with lazy-pages for on-demand page loading
+
+experiment:
+  name: "lazy-pages-test"
+  workload_type: "memory"
+  description: "Lazy pages experiment for on-demand page restoration"
+  save_metrics: true
+  metrics_file: "results/lazy_pages_metrics.json"
+
+checkpoint:
+  dirs:
+    working_dir: "/tmp/criu_checkpoint"
+
+  strategy:
+    mode: "predump"
+    predump_iterations: 4
+    predump_interval: 10
+
+    # Enable lazy-pages
+    lazy_pages: true
+    page_server_port: 22222
+
+transfer:
+  method: "rsync"
+  dest_dir: "/tmp/criu_checkpoint"
+
+workload:
+  type: "memory"
+  mb_size: 256
+  interval: 5.0
+  max_memory_mb: 4096
+  # Enable lazy loading test to measure page fault time
+  check_lazy_loading: true

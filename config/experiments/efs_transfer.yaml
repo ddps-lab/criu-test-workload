@@ -1,0 +1,34 @@
+# EFS Transfer Experiment Configuration
+# ======================================
+# Tests CRIU migration using EFS for checkpoint transfer
+
+experiment:
+  name: "efs-transfer"
+  workload_type: "memory"
+  description: "Migration using EFS shared filesystem for checkpoint transfer"
+  save_metrics: true
+  metrics_file: "results/efs_transfer_metrics.json"
+
+checkpoint:
+  dirs:
+    # Use EFS mount for checkpoints
+    working_dir: "/mnt/efs/criu_checkpoint"
+
+  strategy:
+    mode: "predump"
+    predump_iterations: 8
+    predump_interval: 10
+    lazy_pages: false
+    # No sync needed - already on shared filesystem
+    sync_after_predump: false
+
+transfer:
+  method: "efs"
+  efs_mount: "/mnt/efs"
+
+workload:
+  type: "memory"
+  mb_size: 256
+  interval: 5.0
+  max_memory_mb: 4096
+  working_dir: "/mnt/efs/criu_checkpoint"

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and metrics
+*.log
+experiment_metrics*.json
+results/
+
+# Local config (contains real IPs)
+config/servers.yaml
+
+# Terraform state (if aws-lab included)
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# SSH keys (should never be committed)
+*.pem
+id_rsa
+id_ed25519
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Legacy folder (contains sensitive data and checkpoint images)
+legacy/
+
+# CRIU checkpoint directories
+checkpoint_dir*/
+restore_dir/
+*.img

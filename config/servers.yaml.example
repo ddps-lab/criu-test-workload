@@ -1,0 +1,31 @@
+# Server Configuration Example
+# =============================
+# Copy this file to servers.yaml and edit the IP addresses for your environment
+
+nodes:
+  ssh_user: "ubuntu"
+  ssh_key: "~/.ssh/id_ed25519"
+
+  source:
+    # Source node where workload runs and checkpoint is taken
+    ip: "10.0.1.10"       # Edit: your source node IP
+    name: "az-a-node-0"
+
+  destination:
+    # Destination node where workload is restored
+    ip: "10.0.1.11"       # Edit: your destination node IP
+    name: "az-c-node-0"
+
+
+# AWS Lab environment example:
+# After running terraform in aws-lab/, copy the IPs from output
+#
+# nodes:
+#   ssh_user: "ubuntu"
+#   ssh_key: "~/.ssh/aws-spot-test-key"
+#   source:
+#     ip: "10.0.1.123"    # az_a_instances output
+#     name: "az-a-node"
+#   destination:
+#     ip: "10.0.3.45"     # az_c_instances output
+#     name: "az-c-node"

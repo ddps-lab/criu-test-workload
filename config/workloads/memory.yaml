@@ -1,0 +1,56 @@
+# Memory Allocation Workload Configuration
+# =========================================
+# Configuration for the memory allocation workload
+
+workload:
+  type: "memory"
+
+  # Memory block size to allocate each interval (MB)
+  mb_size: 256
+
+  # Interval between allocations (seconds)
+  interval: 5.0
+
+  # Maximum total memory to allocate (MB)
+  max_memory_mb: 8192
+
+  # Trigger lazy page faults after restore
+  # Set to true for lazy-pages performance testing
+  check_lazy_loading: false
+
+  # Working directory on workload nodes
+  working_dir: "/tmp/criu_checkpoint"
+
+# Pre-configured memory size presets
+# Use with --preset flag in experiments
+presets:
+  # Small workload: 1GB max, fast iterations
+  small:
+    mb_size: 128
+    interval: 2.0
+    max_memory_mb: 1024
+
+  # Medium workload: 4GB max
+  medium:
+    mb_size: 256
+    interval: 5.0
+    max_memory_mb: 4096
+
+  # Large workload: 8GB max
+  large:
+    mb_size: 512
+    interval: 5.0
+    max_memory_mb: 8192
+
+  # Extra large workload: 16GB max
+  xlarge:
+    mb_size: 1024
+    interval: 10.0
+    max_memory_mb: 16384
+
+  # Lazy pages test preset
+  lazy_test:
+    mb_size: 256
+    interval: 5.0
+    max_memory_mb: 4096
+    check_lazy_loading: true

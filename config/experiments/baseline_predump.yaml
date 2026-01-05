@@ -1,0 +1,35 @@
+# Baseline Pre-dump Experiment Configuration
+# ===========================================
+# Tests CRIU migration with iterative pre-dumps
+
+experiment:
+  name: "baseline-predump"
+  workload_type: "memory"
+  description: "Baseline experiment with pre-dump strategy"
+  save_metrics: true
+  metrics_file: "results/baseline_predump_metrics.json"
+
+# Include server configuration
+# Override nodes.source.ip and nodes.destination.ip as needed
+
+checkpoint:
+  dirs:
+    working_dir: "/tmp/criu_checkpoint"
+
+  strategy:
+    mode: "predump"
+    predump_iterations: 8
+    predump_interval: 10
+    lazy_pages: false
+    sync_after_predump: false
+
+transfer:
+  method: "rsync"
+  dest_dir: "/tmp/criu_checkpoint"
+
+workload:
+  type: "memory"
+  mb_size: 256
+  interval: 5.0
+  max_memory_mb: 4096
+  check_lazy_loading: false
