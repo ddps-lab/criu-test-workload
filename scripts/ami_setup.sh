@@ -44,22 +44,32 @@ apt-get install -y \
     iotop \
     sysstat \
     net-tools \
+    iproute2 \
     libprotobuf-dev \
     libprotobuf-c-dev \
     protobuf-c-compiler \
     protobuf-compiler \
     python3-protobuf \
+    pkg-config \
+    uuid-dev \
+    libbsd-dev \
+    libnftables-dev \
     libcap-dev \
     libnl-3-dev \
-    libnet1-dev \
+    libnl-genl-3-dev \
+    libnet-dev \
     libaio-dev \
     libgnutls28-dev \
+    libdrm-dev \
+    libssl-dev \
     libcurl4-openssl-dev \
-    pkg-config \
     python3 \
     python3-pip \
     redis-server \
     ffmpeg
+
+# Install documentation tools (optional, for building docs)
+apt-get install -y --no-install-recommends asciidoc xmlto
 
 # 3. Build CRIU from ddps-lab/criu-s3
 echo "[3/7] Building CRIU (ddps-lab/criu-s3)..."
@@ -71,7 +81,10 @@ git clone https://github.com/ddps-lab/criu-s3.git
 cd criu-s3
 make clean || true
 make -j$(nproc)
-make install
+
+# Install CRIU binary with proper permissions
+install -m 755 ./criu/criu /usr/local/bin/criu
+setcap cap_checkpoint_restore+eip /usr/local/bin/criu
 
 # Verify CRIU installation
 echo "CRIU installed: $(which criu)"
