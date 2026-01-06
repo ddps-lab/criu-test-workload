@@ -24,7 +24,6 @@ env/
 *.log
 experiment_metrics*.json
 results/
-experiment_results/
 
 # Local config (contains real IPs)
 config/servers.yaml

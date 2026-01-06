@@ -179,8 +179,14 @@ def parse_args():
     parser.add_argument(
         '--logs-dir',
         type=str,
-        default='./experiment_results',
-        help='Directory to save collected logs (default: ./experiment_results)'
+        default='./results',
+        help='Directory to save collected logs (default: ./results)'
+    )
+    parser.add_argument(
+        '--name', '-n',
+        type=str,
+        default=None,
+        help='Experiment name (used for log directory naming, e.g., "my_exp" -> "my_exp_20240101_120000")'
     )
 
     return parser.parse_args()
@@ -197,6 +203,10 @@ def build_overrides(args) -> dict:
         overrides['nodes.destination.ip'] = args.dest_ip
     if args.ssh_user:
         overrides['nodes.ssh_user'] = args.ssh_user
+
+    # Experiment name override
+    if args.name:
+        overrides['experiment.name'] = args.name
 
     # Workload overrides
     if args.workload:
@@ -334,7 +344,8 @@ def main():
                     experiment.source_host,
                     experiment.dest_host,
                     args.logs_dir,
-                    experiment.nodes_config.get('ssh_user', 'ubuntu')
+                    experiment.nodes_config.get('ssh_user', 'ubuntu'),
+                    experiment_name=args.name
                 )
                 # Store log paths in metrics
                 experiment.metrics.set_log_files(log_result)

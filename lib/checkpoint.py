@@ -310,7 +310,7 @@ class CheckpointManager:
         # -t pid: checkpoint entire process tree starting from pid
         log_file = f"{checkpoint_dir}/criu-pre-dump.log"
         criu_cmd = f"sudo criu pre-dump -D {checkpoint_dir} -t {pid} --shell-job --track-mem"
-        criu_cmd += f" --log-file criu-pre-dump.log -v4"
+        criu_cmd += f" --log-file {log_file} -v4"
 
         # Add --prev-images-dir for iterations after the first
         if iteration > 1:
@@ -371,7 +371,7 @@ class CheckpointManager:
         # -t pid: checkpoint entire process tree starting from pid
         log_file = f"{checkpoint_dir}/criu-dump.log"
         criu_cmd = f"sudo criu dump -D {checkpoint_dir} -t {pid} --shell-job --track-mem"
-        criu_cmd += f" --log-file criu-dump.log -v4"
+        criu_cmd += f" --log-file {log_file} -v4"
 
         # Add --prev-images-dir if there were pre-dumps
         if last_iteration > 0:
@@ -470,7 +470,7 @@ class CheckpointManager:
         if lazy_pages and page_server_host:
             logger.info(f"Starting page server on {host} (log: {lazy_pages_log_file})")
             page_server_cmd = f"sudo criu lazy-pages --images-dir {checkpoint_dir} --page-server --address {page_server_host} --port {page_server_port}"
-            page_server_cmd += f" --log-file criu-lazy-pages.log -v4 &"
+            page_server_cmd += f" --log-file {lazy_pages_log_file} -v4 &"
             client.execute_background(page_server_cmd)
             time.sleep(2)  # Give page server time to start
 
@@ -479,7 +479,7 @@ class CheckpointManager:
         # This allows us to measure actual restore time, not process runtime
         # --pidfile: write restored process PID to file for verification
         criu_cmd = f"sudo criu restore -D {checkpoint_dir} --shell-job -d"
-        criu_cmd += f" --log-file criu-restore.log -v4"
+        criu_cmd += f" --log-file {restore_log_file} -v4"
 
         if pid_file:
             criu_cmd += f" --pidfile {pid_file}"
@@ -736,7 +736,7 @@ class CheckpointManager:
         }
 
     def collect_logs(self, source_host: str, dest_host: str, local_output_dir: str,
-                     username: str = 'ubuntu') -> Dict[str, Any]:
+                     username: str = 'ubuntu', experiment_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Collect CRIU log files from source and destination nodes.
 
@@ -745,6 +745,7 @@ class CheckpointManager:
             dest_host: Destination node IP
             local_output_dir: Local directory to save logs
             username: SSH username
+            experiment_name: Optional experiment name for directory naming
 
         Returns:
             Dictionary with collected log file paths
@@ -753,7 +754,13 @@ class CheckpointManager:
 
         # Create timestamped output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = Path(local_output_dir) / f"criu_logs_{timestamp}"
+        if experiment_name:
+            # Use experiment name with timestamp: my_exp_20240101_120000
+            dir_name = f"{experiment_name}_{timestamp}"
+        else:
+            # Default: criu_logs_20240101_120000
+            dir_name = f"criu_logs_{timestamp}"
+        output_dir = Path(local_output_dir) / dir_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
         collected = {
