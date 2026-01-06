@@ -331,6 +331,9 @@ class CheckpointManager:
                 'error': stderr
             }
 
+        # Fix permissions for rsync (CRIU creates files as root)
+        client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
+
         logger.info(f"Pre-dump {iteration} completed in {duration:.2f}s")
 
         return {
@@ -424,6 +427,10 @@ class CheckpointManager:
                 }
 
         duration = time.time() - start_time
+
+        # Fix permissions for rsync (CRIU creates files as root)
+        client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
+
         logger.info(f"Final dump completed in {duration:.2f}s")
 
         return {
