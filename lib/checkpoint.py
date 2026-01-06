@@ -770,12 +770,17 @@ class CheckpointManager:
             'timestamp': timestamp
         }
 
+        # Source log patterns: pre-dump, dump, and page-server (for live migration)
+        source_patterns = ['criu-pre-dump.log', 'criu-dump.log', 'criu-page-server.log']
+        # Dest log patterns: restore and lazy-pages only (dump logs are rsync copies)
+        dest_patterns = ['criu-restore.log', 'criu-lazy-pages.log']
+
         # Collect from source node
         source_client = self.get_ssh_client(source_host, username)
         source_dir = output_dir / "source"
         source_dir.mkdir(exist_ok=True)
 
-        # Find all checkpoint directories and collect logs
+        # Find checkpoint directories and collect source-specific logs
         stdout, stderr, status = source_client.execute(
             f"find {self.working_dir} -name '*.log' -type f 2>/dev/null"
         )
@@ -783,13 +788,15 @@ class CheckpointManager:
         if status == 0 and stdout.strip():
             for remote_log in stdout.strip().split('\n'):
                 if remote_log:
-                    # Preserve directory structure
-                    rel_path = remote_log.replace(self.working_dir + '/', '')
-                    local_path = source_dir / rel_path
-                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    filename = Path(remote_log).name
+                    # Only collect source-specific logs
+                    if filename in source_patterns:
+                        rel_path = remote_log.replace(self.working_dir + '/', '')
+                        local_path = source_dir / rel_path
+                        local_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    if source_client.download_file(remote_log, str(local_path)):
-                        collected['source'].append(str(local_path))
+                        if source_client.download_file(remote_log, str(local_path)):
+                            collected['source'].append(str(local_path))
 
         # Collect from destination node
         dest_client = self.get_ssh_client(dest_host, username)
@@ -803,12 +810,15 @@ class CheckpointManager:
         if status == 0 and stdout.strip():
             for remote_log in stdout.strip().split('\n'):
                 if remote_log:
-                    rel_path = remote_log.replace(self.working_dir + '/', '')
-                    local_path = dest_dir / rel_path
-                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    filename = Path(remote_log).name
+                    # Only collect dest-specific logs (restore, lazy-pages)
+                    if filename in dest_patterns:
+                        rel_path = remote_log.replace(self.working_dir + '/', '')
+                        local_path = dest_dir / rel_path
+                        local_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    if dest_client.download_file(remote_log, str(local_path)):
-                        collected['dest'].append(str(local_path))
+                        if dest_client.download_file(remote_log, str(local_path)):
+                            collected['dest'].append(str(local_path))
 
         total = len(collected['source']) + len(collected['dest'])
         logger.info(f"Collected {total} log files to {output_dir}")
