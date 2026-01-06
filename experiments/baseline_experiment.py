@@ -132,6 +132,12 @@ def parse_args():
         action='store_true',
         help='Enable lazy-pages mode'
     )
+    parser.add_argument(
+        '--wait-before-dump',
+        type=int,
+        default=None,
+        help='Seconds to wait before full dump (for strategy: full)'
+    )
 
     # Transfer configuration
     parser.add_argument(
@@ -191,6 +197,8 @@ def build_overrides(args) -> dict:
         overrides['checkpoint.strategy.predump_interval'] = args.predump_interval
     if args.lazy_pages:
         overrides['checkpoint.strategy.lazy_pages'] = True
+    if args.wait_before_dump is not None:
+        overrides['checkpoint.strategy.wait_before_dump'] = args.wait_before_dump
 
     # Transfer overrides
     if args.transfer_method:
