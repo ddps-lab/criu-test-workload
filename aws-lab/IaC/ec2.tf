@@ -72,11 +72,11 @@ resource "aws_instance" "bastion_ec2" {
   chmod 600 /root/.ssh/id_ed25519
   echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
   systemctl restart sshd
-  cat <<FOE >> /home/$USERNAME/.ssh/config
-  Host *
-      StrictHostKeyChecking no
-      UserKnownHostsFile=/dev/null
-  FOE
+  cat <<'FOE' >> /home/$USERNAME/.ssh/config
+Host *
+    StrictHostKeyChecking no
+    UserKnownHostsFile=/dev/null
+FOE
 
   # Environment variables for experiment scripts
   echo "export AZ_A_INSTANCES_IP='${join(" ", aws_instance.az_a_ec2[*].private_ip)}'" >> /home/$USERNAME/.bashrc
@@ -188,11 +188,11 @@ resource "aws_instance" "az_a_ec2" {
   chmod 600 /root/.ssh/id_ed25519
   echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
   systemctl restart sshd
-  cat <<FOE >> /home/$USERNAME/.ssh/config
-  Host *
-      StrictHostKeyChecking no
-      UserKnownHostsFile=/dev/null
-  FOE
+  cat <<'FOE' >> /home/$USERNAME/.ssh/config
+Host *
+    StrictHostKeyChecking no
+    UserKnownHostsFile=/dev/null
+FOE
 
   # EFS mount (if enabled)
   %{ if var.enable_efs_module == true }
@@ -262,11 +262,11 @@ resource "aws_instance" "az_c_ec2" {
   chmod 600 /root/.ssh/id_ed25519
   echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
   systemctl restart sshd
-  cat <<FOE >> /home/$USERNAME/.ssh/config
-  Host *
-      StrictHostKeyChecking no
-      UserKnownHostsFile=/dev/null
-  FOE
+  cat <<'FOE' >> /home/$USERNAME/.ssh/config
+Host *
+    StrictHostKeyChecking no
+    UserKnownHostsFile=/dev/null
+FOE
 
   # EFS mount (if enabled)
   %{ if var.enable_efs_module == true }

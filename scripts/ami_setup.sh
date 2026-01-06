@@ -92,7 +92,7 @@ criu --version
 
 # 4. Install Python packages
 echo "[4/7] Installing Python packages..."
-pip3 install --break-system-packages numpy redis paramiko pyyaml
+pip3 install --break-system-packages numpy redis paramiko pyyaml boto3 scp
 pip3 install --break-system-packages torch --index-url https://download.pytorch.org/whl/cpu
 
 # 5. Clone workload repository
