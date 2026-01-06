@@ -502,6 +502,9 @@ class CheckpointManager:
                 'stdout': stdout
             }
 
+        # Fix permissions for log collection (CRIU creates files as root)
+        client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
+
         logger.info(f"Restore completed in {duration:.2f}s")
 
         return {
