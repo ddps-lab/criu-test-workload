@@ -60,6 +60,16 @@ criu_workload/
 
 ### 1. 환경 설정
 
+Terraform으로 인프라를 배포하면 `config/servers.yaml`이 자동 생성됩니다. 별도의 환경 설정 없이 바로 실험을 실행할 수 있습니다.
+
+```bash
+# AWS Lab에서는 자동 설정됨 - 바로 실험 실행 가능
+cd /opt/criu_workload
+python3 run_experiment.py
+```
+
+수동 설정이 필요한 경우:
+
 ```bash
 # 방법 1: 환경 변수 직접 설정
 export SOURCE_NODE_IP="10.0.1.10"
@@ -390,22 +400,63 @@ python3 run_experiment.py --workload dataproc --num-rows 100000 --interval 0.1
 
 ## 설정
 
-### 기본 설정
+설정은 두 개의 파일로 분리되어 있습니다:
+
+| 파일 | 용도 | 생성 방법 |
+|------|------|----------|
+| `config/default.yaml` | 실험 설정 (워크로드, 체크포인트 전략 등) | 수동 편집 |
+| `config/servers.yaml` | 노드 IP 정보 | Terraform 자동 생성 |
+
+### 서버 설정 (servers.yaml)
+
+Terraform으로 인프라를 배포하면 `config/servers.yaml`이 자동 생성됩니다. 실험 스크립트는 이 파일에서 노드 IP를 자동으로 읽어옵니다.
+
+```yaml
+# config/servers.yaml (Terraform이 자동 생성)
+nodes:
+  ssh_user: "ubuntu"
+  ssh_key: "~/.ssh/id_ed25519"
+
+  source:
+    ip: "192.168.10.100"
+    name: "az-a-node-0"
+
+  destination:
+    ip: "192.168.10.101"
+    name: "az-a-node-1"
+
+# 모든 사용 가능한 노드
+all_nodes:
+  az_a:
+    - ip: "192.168.10.100"
+      name: "az-a-node-0"
+    - ip: "192.168.10.101"
+      name: "az-a-node-1"
+  az_c:
+    - ip: "192.168.20.100"
+      name: "az-c-node-0"
+```
+
+**참고**: `servers.yaml`이 없으면 `default.yaml`의 환경변수(`${SOURCE_NODE_IP}`, `${DEST_NODE_IP}`)를 사용합니다.
+
+### 실험 설정 (default.yaml)
 
 ```yaml
 # config/default.yaml
 experiment:
   name: "default-experiment"
-  workload_type: "memory"
+  workload_type: "memory"      # 워크로드 타입
   save_metrics: true
 
+# 노드 설정 (servers.yaml이 없을 때 fallback)
 nodes:
   ssh_user: "ubuntu"
   source:
-    ip: "${SOURCE_NODE_IP}"
+    ip: "${SOURCE_NODE_IP}"    # 환경변수 사용
   destination:
     ip: "${DEST_NODE_IP}"
 
+# 체크포인트 전략
 checkpoint:
   strategy:
     mode: "predump"           # 또는 "full"
@@ -413,6 +464,7 @@ checkpoint:
     predump_interval: 10
     lazy_pages: false
 
+# 전송 방법
 transfer:
   method: "rsync"             # rsync, s3, efs, ebs
 ```
@@ -507,7 +559,7 @@ python3 run_experiment.py \
 
 ### EBS를 사용한 체크포인트 전송
 
-EBS 볼륨 attach/detach 패턴은 `aws-lab/ebs_test/live_migration_with_ebs.py`를 참조하세요.
+EBS 볼륨을 사용한 체크포인트 전송은 볼륨 detach/attach 패턴을 사용합니다. 설정 파일에서 `transfer.method: ebs`로 지정하면 됩니다.
 
 ---
 
