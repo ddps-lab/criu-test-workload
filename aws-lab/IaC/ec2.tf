@@ -100,6 +100,39 @@ resource "aws_instance" "bastion_ec2" {
   # Update criu_workload repo
   cd /opt/criu_workload && git pull origin main || true
   chown -R $USERNAME:$USERNAME /opt/criu_workload
+
+  # Generate servers.yaml with instance IPs
+  cat <<FOE > /opt/criu_workload/config/servers.yaml
+# Auto-generated server configuration
+# AZ-A instances: ${join(", ", aws_instance.az_a_ec2[*].private_ip)}
+# AZ-C instances: ${join(", ", aws_instance.az_c_ec2[*].private_ip)}
+
+nodes:
+  ssh_user: "ubuntu"
+  ssh_key: "~/.ssh/id_ed25519"
+
+  source:
+    ip: "${length(aws_instance.az_a_ec2) > 0 ? aws_instance.az_a_ec2[0].private_ip : ""}"
+    name: "az-a-node-0"
+
+  destination:
+    ip: "${length(aws_instance.az_a_ec2) > 1 ? aws_instance.az_a_ec2[1].private_ip : (length(aws_instance.az_c_ec2) > 0 ? aws_instance.az_c_ec2[0].private_ip : "")}"
+    name: "${length(aws_instance.az_a_ec2) > 1 ? "az-a-node-1" : (length(aws_instance.az_c_ec2) > 0 ? "az-c-node-0" : "")}"
+
+# All available nodes
+all_nodes:
+  az_a:
+%{ for idx, ip in aws_instance.az_a_ec2[*].private_ip ~}
+    - ip: "${ip}"
+      name: "az-a-node-${idx}"
+%{ endfor ~}
+  az_c:
+%{ for idx, ip in aws_instance.az_c_ec2[*].private_ip ~}
+    - ip: "${ip}"
+      name: "az-c-node-${idx}"
+%{ endfor ~}
+FOE
+  chown $USERNAME:$USERNAME /opt/criu_workload/config/servers.yaml
   EOF
 
   depends_on = [ aws_instance.az_a_ec2, aws_instance.az_c_ec2, module.efs ]
@@ -113,7 +146,7 @@ resource "aws_instance" "az_a_ec2" {
   subnet_id = module.vpc.public_subnets[0]
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
   root_block_device {
-    volume_size = 50
+    volume_size = 100
   }
   dynamic "ephemeral_block_device" {
     for_each = var.enable_ephemeral_block_device ? [1] : []
@@ -190,7 +223,7 @@ resource "aws_instance" "az_c_ec2" {
     Name = "${var.prefix}-az-c-ec2-${count.index}"
   }
   root_block_device {
-    volume_size = 50
+    volume_size = 100
   }
   dynamic "ephemeral_block_device" {
     for_each = var.enable_ephemeral_block_device ? [1] : []
