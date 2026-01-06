@@ -69,8 +69,8 @@ class SSHClient:
             stdout_str = stdout.read().decode('utf-8')
             stderr_str = stderr.read().decode('utf-8')
 
-            if exit_status != 0:
-                logger.warning(f"Command failed with exit code {exit_status}: {stderr_str}")
+            if exit_status != 0 and stderr_str.strip():
+                logger.debug(f"Command exited with code {exit_status}: {stderr_str}")
 
             return stdout_str, stderr_str, exit_status
 
