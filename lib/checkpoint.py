@@ -553,6 +553,90 @@ class CheckpointManager:
                 'error': f'{workload_type} process not found'
             }
 
+    def cleanup_processes(self, host: str, workload_type: str, username: str = 'ubuntu') -> Dict[str, Any]:
+        """
+        Terminate workload processes on remote host.
+
+        Args:
+            host: Remote host IP
+            workload_type: Type of workload to terminate
+            username: SSH username
+
+        Returns:
+            Dictionary with cleanup results
+        """
+        client = self.get_ssh_client(host, username)
+
+        # Build process pattern based on workload type
+        if workload_type == 'redis':
+            pattern = 'redis-server'
+        elif workload_type == 'video':
+            pattern = 'ffmpeg'
+        else:
+            pattern = f'{workload_type}_standalone.py'
+
+        # Kill matching processes
+        kill_cmd = f"pkill -f '{pattern}' 2>/dev/null || true"
+        stdout, stderr, status = client.execute(kill_cmd)
+
+        # Also kill any lingering CRIU processes
+        client.execute("sudo pkill -f 'criu lazy-pages' 2>/dev/null || true")
+
+        logger.info(f"Cleaned up {workload_type} processes on {host}")
+
+        return {
+            'cleaned': True,
+            'host': host,
+            'workload_type': workload_type
+        }
+
+    def wait_for_lazy_pages_complete(self, host: str, timeout: int = 600,
+                                      username: str = 'ubuntu') -> Dict[str, Any]:
+        """
+        Wait for lazy-pages server to complete all page transfers.
+
+        The lazy-pages server automatically exits when all pages have been transferred.
+
+        Args:
+            host: Host where lazy-pages server is running
+            timeout: Maximum time to wait in seconds
+            username: SSH username
+
+        Returns:
+            Dictionary with completion status and timing
+        """
+        client = self.get_ssh_client(host, username)
+
+        logger.info(f"Waiting for lazy-pages completion on {host}...")
+
+        start_time = time.time()
+        check_interval = 0.5
+
+        while time.time() - start_time < timeout:
+            # Check if lazy-pages process is still running
+            stdout, stderr, status = client.execute(
+                "pgrep -f 'criu lazy-pages' 2>/dev/null"
+            )
+
+            if status != 0 or not stdout.strip():
+                # Process not found = completed
+                duration = time.time() - start_time
+                logger.info(f"Lazy-pages completed in {duration:.2f}s")
+                return {
+                    'completed': True,
+                    'duration': duration
+                }
+
+            time.sleep(check_interval)
+
+        duration = time.time() - start_time
+        logger.warning(f"Lazy-pages timeout after {duration:.2f}s")
+        return {
+            'completed': False,
+            'duration': duration,
+            'error': f'Timeout after {timeout}s'
+        }
+
     def close_all_connections(self):
         """Close all SSH connections."""
         for host, client in self.ssh_clients.items():

@@ -163,6 +163,13 @@ def parse_args():
         help='Logging level'
     )
 
+    # Process lifecycle
+    parser.add_argument(
+        '--no-cleanup',
+        action='store_true',
+        help='Skip process cleanup after experiment (keep restored process running)'
+    )
+
     return parser.parse_args()
 
 
@@ -294,7 +301,32 @@ def main():
             if metrics.get('restore'):
                 print(f"Restore: {metrics['restore']['duration']:.2f}s")
 
+            # Handle lazy-pages completion tracking
+            if metrics.get('lazy_pages_completion'):
+                lp = metrics['lazy_pages_completion']
+                if lp.get('completed'):
+                    print(f"Lazy-pages: {lp['duration']:.2f}s")
+                else:
+                    print(f"Lazy-pages: timeout ({lp.get('error', 'unknown')})")
+
             print("=" * 60)
+
+            # Cleanup processes unless --no-cleanup specified
+            if not args.no_cleanup:
+                logger.info("Cleaning up processes...")
+                experiment.checkpoint_mgr.cleanup_processes(
+                    experiment.dest_host,
+                    workload_type,
+                    experiment.nodes_config.get('ssh_user', 'ubuntu')
+                )
+                # Also cleanup source node
+                experiment.checkpoint_mgr.cleanup_processes(
+                    experiment.source_host,
+                    workload_type,
+                    experiment.nodes_config.get('ssh_user', 'ubuntu')
+                )
+            else:
+                logger.info("Skipping cleanup (--no-cleanup specified)")
 
             return 0
 
