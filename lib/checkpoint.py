@@ -91,6 +91,80 @@ class SSHClient:
         logger.debug(f"Executing in background on {self.host}: {command}")
         self.client.exec_command(command)
 
+    def download_file(self, remote_path: str, local_path: str) -> bool:
+        """
+        Download file from remote host using SFTP.
+
+        Args:
+            remote_path: Path on remote host
+            local_path: Local destination path
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if self.client is None:
+            self.connect()
+
+        try:
+            sftp = self.client.open_sftp()
+            sftp.get(remote_path, local_path)
+            sftp.close()
+            logger.debug(f"Downloaded {remote_path} to {local_path}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to download {remote_path}: {e}")
+            return False
+
+    def download_directory(self, remote_dir: str, local_dir: str, pattern: str = "*.log") -> List[str]:
+        """
+        Download files matching pattern from remote directory.
+
+        Args:
+            remote_dir: Remote directory path
+            local_dir: Local destination directory
+            pattern: Glob pattern for files to download (default: *.log)
+
+        Returns:
+            List of downloaded file paths
+        """
+        if self.client is None:
+            self.connect()
+
+        downloaded = []
+        try:
+            sftp = self.client.open_sftp()
+
+            # Create local directory if needed
+            Path(local_dir).mkdir(parents=True, exist_ok=True)
+
+            # List remote directory
+            try:
+                files = sftp.listdir(remote_dir)
+            except FileNotFoundError:
+                logger.warning(f"Remote directory not found: {remote_dir}")
+                sftp.close()
+                return downloaded
+
+            # Download matching files
+            import fnmatch
+            for filename in files:
+                if fnmatch.fnmatch(filename, pattern):
+                    remote_path = f"{remote_dir}/{filename}"
+                    local_path = f"{local_dir}/{filename}"
+                    try:
+                        sftp.get(remote_path, local_path)
+                        downloaded.append(local_path)
+                        logger.debug(f"Downloaded {remote_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to download {remote_path}: {e}")
+
+            sftp.close()
+
+        except Exception as e:
+            logger.error(f"Failed to download from {remote_dir}: {e}")
+
+        return downloaded
+
     def close(self):
         """Close SSH connection."""
         if self.client:
@@ -234,13 +308,15 @@ class CheckpointManager:
 
         # Build CRIU pre-dump command
         # -t pid: checkpoint entire process tree starting from pid
+        log_file = f"{checkpoint_dir}/criu-pre-dump.log"
         criu_cmd = f"sudo criu pre-dump -D {checkpoint_dir} -t {pid} --shell-job --track-mem"
+        criu_cmd += f" --log-file criu-pre-dump.log -v4"
 
         # Add --prev-images-dir for iterations after the first
         if iteration > 1:
             criu_cmd += f" --prev-images-dir ../{iteration - 1}"
 
-        logger.info(f"Pre-dump iteration {iteration} on {host}")
+        logger.info(f"Pre-dump iteration {iteration} on {host} (log: {log_file})")
 
         start_time = time.time()
         stdout, stderr, status = client.execute(criu_cmd, timeout=120)
@@ -261,7 +337,8 @@ class CheckpointManager:
             'success': True,
             'iteration': iteration,
             'duration': duration,
-            'checkpoint_dir': checkpoint_dir
+            'checkpoint_dir': checkpoint_dir,
+            'log_file': log_file
         }
 
     def final_dump(self, host: str, pid: str, last_iteration: int, lazy_pages: bool = False,
@@ -289,7 +366,9 @@ class CheckpointManager:
 
         # Build CRIU dump command
         # -t pid: checkpoint entire process tree starting from pid
+        log_file = f"{checkpoint_dir}/criu-dump.log"
         criu_cmd = f"sudo criu dump -D {checkpoint_dir} -t {pid} --shell-job --track-mem"
+        criu_cmd += f" --log-file criu-dump.log -v4"
 
         # Add --prev-images-dir if there were pre-dumps
         if last_iteration > 0:
@@ -301,7 +380,7 @@ class CheckpointManager:
             # Run in background for lazy-pages
             criu_cmd += " &"
 
-        logger.info(f"Final dump on {host} (iteration {iteration}, lazy_pages={lazy_pages})")
+        logger.info(f"Final dump on {host} (iteration {iteration}, lazy_pages={lazy_pages}, log: {log_file})")
 
         start_time = time.time()
 
@@ -352,7 +431,8 @@ class CheckpointManager:
             'iteration': iteration,
             'duration': duration,
             'checkpoint_dir': checkpoint_dir,
-            'lazy_pages': lazy_pages
+            'lazy_pages': lazy_pages,
+            'log_file': log_file
         }
 
     def restore(self, host: str, checkpoint_dir: str, lazy_pages: bool = False,
@@ -375,10 +455,15 @@ class CheckpointManager:
         """
         client = self.get_ssh_client(host, username)
 
+        # Log file paths
+        restore_log_file = f"{checkpoint_dir}/criu-restore.log"
+        lazy_pages_log_file = f"{checkpoint_dir}/criu-lazy-pages.log" if lazy_pages else None
+
         # If using lazy-pages, start page server first
         if lazy_pages and page_server_host:
-            logger.info(f"Starting page server on {host}")
-            page_server_cmd = f"sudo criu lazy-pages --images-dir {checkpoint_dir} --page-server --address {page_server_host} --port {page_server_port} &"
+            logger.info(f"Starting page server on {host} (log: {lazy_pages_log_file})")
+            page_server_cmd = f"sudo criu lazy-pages --images-dir {checkpoint_dir} --page-server --address {page_server_host} --port {page_server_port}"
+            page_server_cmd += f" --log-file criu-lazy-pages.log -v4 &"
             client.execute_background(page_server_cmd)
             time.sleep(2)  # Give page server time to start
 
@@ -387,6 +472,7 @@ class CheckpointManager:
         # This allows us to measure actual restore time, not process runtime
         # --pidfile: write restored process PID to file for verification
         criu_cmd = f"sudo criu restore -D {checkpoint_dir} --shell-job -d"
+        criu_cmd += f" --log-file criu-restore.log -v4"
 
         if pid_file:
             criu_cmd += f" --pidfile {pid_file}"
@@ -394,7 +480,7 @@ class CheckpointManager:
         if lazy_pages:
             criu_cmd += " --lazy-pages"
 
-        logger.info(f"Restoring on {host} from {checkpoint_dir}")
+        logger.info(f"Restoring on {host} from {checkpoint_dir} (log: {restore_log_file})")
 
         start_time = time.time()
         stdout, stderr, status = client.execute(criu_cmd, timeout=300)
@@ -414,7 +500,9 @@ class CheckpointManager:
         return {
             'success': True,
             'duration': duration,
-            'lazy_pages': lazy_pages
+            'lazy_pages': lazy_pages,
+            'log_file': restore_log_file,
+            'lazy_pages_log_file': lazy_pages_log_file
         }
 
     def verify_restore(self, host: str, pid: Optional[str] = None,
@@ -636,6 +724,79 @@ class CheckpointManager:
             'duration': duration,
             'error': f'Timeout after {timeout}s'
         }
+
+    def collect_logs(self, source_host: str, dest_host: str, local_output_dir: str,
+                     username: str = 'ubuntu') -> Dict[str, Any]:
+        """
+        Collect CRIU log files from source and destination nodes.
+
+        Args:
+            source_host: Source node IP
+            dest_host: Destination node IP
+            local_output_dir: Local directory to save logs
+            username: SSH username
+
+        Returns:
+            Dictionary with collected log file paths
+        """
+        from datetime import datetime
+
+        # Create timestamped output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(local_output_dir) / f"criu_logs_{timestamp}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        collected = {
+            'output_dir': str(output_dir),
+            'source': [],
+            'dest': [],
+            'timestamp': timestamp
+        }
+
+        # Collect from source node
+        source_client = self.get_ssh_client(source_host, username)
+        source_dir = output_dir / "source"
+        source_dir.mkdir(exist_ok=True)
+
+        # Find all checkpoint directories and collect logs
+        stdout, stderr, status = source_client.execute(
+            f"find {self.working_dir} -name '*.log' -type f 2>/dev/null"
+        )
+
+        if status == 0 and stdout.strip():
+            for remote_log in stdout.strip().split('\n'):
+                if remote_log:
+                    # Preserve directory structure
+                    rel_path = remote_log.replace(self.working_dir + '/', '')
+                    local_path = source_dir / rel_path
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    if source_client.download_file(remote_log, str(local_path)):
+                        collected['source'].append(str(local_path))
+
+        # Collect from destination node
+        dest_client = self.get_ssh_client(dest_host, username)
+        dest_dir = output_dir / "dest"
+        dest_dir.mkdir(exist_ok=True)
+
+        stdout, stderr, status = dest_client.execute(
+            f"find {self.working_dir} -name '*.log' -type f 2>/dev/null"
+        )
+
+        if status == 0 and stdout.strip():
+            for remote_log in stdout.strip().split('\n'):
+                if remote_log:
+                    rel_path = remote_log.replace(self.working_dir + '/', '')
+                    local_path = dest_dir / rel_path
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    if dest_client.download_file(remote_log, str(local_path)):
+                        collected['dest'].append(str(local_path))
+
+        total = len(collected['source']) + len(collected['dest'])
+        logger.info(f"Collected {total} log files to {output_dir}")
+
+        return collected
 
     def close_all_connections(self):
         """Close all SSH connections."""

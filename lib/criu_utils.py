@@ -61,11 +61,17 @@ class CRIUExperiment:
             workload_type=self.experiment_config['workload_type']
         )
 
+        # Store config and node info in metrics
+        self.metrics.set_config(self.config)
+
         # Workload instance (will be created by subclass or factory)
         self.workload = None
         self.source_host = self.nodes_config['source']['ip']
         self.dest_host = self.nodes_config['destination']['ip']
         self.ssh_user = self.nodes_config.get('ssh_user', 'ubuntu')
+
+        # Store node info in metrics
+        self.metrics.set_nodes(self.source_host, self.dest_host)
 
         # Experiment state
         self.workload_pid: Optional[str] = None

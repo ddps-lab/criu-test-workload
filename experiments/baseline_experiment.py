@@ -170,6 +170,19 @@ def parse_args():
         help='Skip process cleanup after experiment (keep restored process running)'
     )
 
+    # Log collection
+    parser.add_argument(
+        '--collect-logs',
+        action='store_true',
+        help='Collect CRIU log files from nodes after experiment'
+    )
+    parser.add_argument(
+        '--logs-dir',
+        type=str,
+        default='./experiment_results',
+        help='Directory to save collected logs (default: ./experiment_results)'
+    )
+
     return parser.parse_args()
 
 
@@ -250,6 +263,9 @@ def main():
             config_overrides=overrides
         )
 
+        # Store CLI args in metrics
+        experiment.metrics.set_cli_args(vars(args))
+
         # Create workload
         workload_type = experiment.config.get('experiment', {}).get('workload_type', 'memory')
         workload_config = experiment.config.get('workload', {})
@@ -310,6 +326,27 @@ def main():
                     print(f"Lazy-pages: timeout ({lp.get('error', 'unknown')})")
 
             print("=" * 60)
+
+            # Collect logs if requested
+            if args.collect_logs:
+                logger.info("Collecting CRIU logs from nodes...")
+                log_result = experiment.checkpoint_mgr.collect_logs(
+                    experiment.source_host,
+                    experiment.dest_host,
+                    args.logs_dir,
+                    experiment.nodes_config.get('ssh_user', 'ubuntu')
+                )
+                # Store log paths in metrics
+                experiment.metrics.set_log_files(log_result)
+
+                print(f"Logs collected: {log_result['output_dir']}")
+                print(f"  Source: {len(log_result['source'])} files")
+                print(f"  Dest: {len(log_result['dest'])} files")
+
+                # Also save metrics alongside logs
+                metrics_file = f"{log_result['output_dir']}/experiment_metrics.json"
+                experiment.metrics.save_to_file(metrics_file)
+                print(f"  Metrics: {metrics_file}")
 
             # Cleanup processes unless --no-cleanup specified
             if not args.no_cleanup:

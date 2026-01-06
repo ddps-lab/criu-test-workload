@@ -30,6 +30,13 @@ class ExperimentMetrics:
     restore: Optional[TimingMetric] = None
     custom_metrics: Dict[str, TimingMetric] = field(default_factory=dict)
 
+    # Extended metadata
+    timestamp: str = ""
+    config: Dict[str, Any] = field(default_factory=dict)
+    cli_args: Dict[str, Any] = field(default_factory=dict)
+    nodes: Dict[str, str] = field(default_factory=dict)
+    log_files: Dict[str, List[str]] = field(default_factory=dict)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert metrics to dictionary."""
         result = asdict(self)
@@ -107,12 +114,66 @@ class MetricsCollector:
             experiment_name: Name of the experiment
             workload_type: Type of workload being tested
         """
+        from datetime import datetime
+
         self.metrics = ExperimentMetrics(
             experiment_name=experiment_name,
-            workload_type=workload_type
+            workload_type=workload_type,
+            timestamp=datetime.now().isoformat()
         )
         self.start_time = time.time()
         self._active_timers: Dict[str, float] = {}
+
+    def set_config(self, config: Dict[str, Any]):
+        """
+        Store experiment configuration.
+
+        Args:
+            config: Full experiment configuration dictionary
+        """
+        # Store relevant config sections
+        self.metrics.config = {
+            'checkpoint': config.get('checkpoint', {}),
+            'transfer': config.get('transfer', {}),
+            'workload': config.get('workload', {}),
+            'experiment': config.get('experiment', {})
+        }
+
+    def set_cli_args(self, args_dict: Dict[str, Any]):
+        """
+        Store CLI arguments used for the experiment.
+
+        Args:
+            args_dict: Dictionary of CLI arguments
+        """
+        # Filter out None values
+        self.metrics.cli_args = {k: v for k, v in args_dict.items() if v is not None}
+
+    def set_nodes(self, source: str, dest: str):
+        """
+        Store node information.
+
+        Args:
+            source: Source node IP
+            dest: Destination node IP
+        """
+        self.metrics.nodes = {
+            'source': source,
+            'destination': dest
+        }
+
+    def set_log_files(self, log_result: Dict[str, Any]):
+        """
+        Store collected log file paths.
+
+        Args:
+            log_result: Result from collect_logs()
+        """
+        self.metrics.log_files = {
+            'output_dir': log_result.get('output_dir', ''),
+            'source': log_result.get('source', []),
+            'dest': log_result.get('dest', [])
+        }
 
     def start_timer(self, name: str):
         """
