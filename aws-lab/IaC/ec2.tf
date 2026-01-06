@@ -53,56 +53,57 @@ resource "aws_instance" "bastion_ec2" {
   }
   iam_instance_profile = aws_iam_instance_profile.ec2_instance_profile.name
   user_data = <<-EOF
-  #!/bin/bash
-  # Bastion EC2 userdata
-  # Note: Most dependencies are pre-installed in the AMI (ami_setup.sh)
-  # This script only handles dynamic configuration (SSH keys, env vars, mounts)
+#!/bin/bash
+# Bastion EC2 userdata
+# Note: Most dependencies are pre-installed in the AMI (ami_setup.sh)
+# This script only handles dynamic configuration (SSH keys, env vars, mounts)
 
-  sudo su
-  export USERNAME="ubuntu"
+export USERNAME="ubuntu"
 
-  # SSH key setup (dynamically generated)
-  echo "${tls_private_key.ssh_key.public_key_openssh}" >> /home/$USERNAME/.ssh/authorized_keys
-  echo "${tls_private_key.ssh_key.public_key_openssh}" >> /root/.ssh/authorized_keys
-  echo "${tls_private_key.ssh_key.private_key_openssh}" >> /home/$USERNAME/.ssh/id_ed25519
-  echo "${tls_private_key.ssh_key.private_key_openssh}" >> /root/.ssh/id_ed25519
-  chown $USERNAME:$USERNAME /home/$USERNAME/.ssh -R
-  chown root:root /root/.ssh -R
-  chmod 600 /home/$USERNAME/.ssh/id_ed25519
-  chmod 600 /root/.ssh/id_ed25519
-  echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
-  systemctl restart sshd
-  cat <<'FOE' >> /home/$USERNAME/.ssh/config
+# SSH key setup (dynamically generated)
+echo "${tls_private_key.ssh_key.public_key_openssh}" >> /home/$USERNAME/.ssh/authorized_keys
+echo "${tls_private_key.ssh_key.public_key_openssh}" >> /root/.ssh/authorized_keys
+echo "${tls_private_key.ssh_key.private_key_openssh}" >> /home/$USERNAME/.ssh/id_ed25519
+echo "${tls_private_key.ssh_key.private_key_openssh}" >> /root/.ssh/id_ed25519
+chown $USERNAME:$USERNAME /home/$USERNAME/.ssh -R
+chown root:root /root/.ssh -R
+chmod 600 /home/$USERNAME/.ssh/id_ed25519
+chmod 600 /root/.ssh/id_ed25519
+echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
+systemctl restart ssh || systemctl restart sshd
+cat <<'FOE' >> /home/$USERNAME/.ssh/config
 Host *
     StrictHostKeyChecking no
     UserKnownHostsFile=/dev/null
 FOE
 
-  # Environment variables for experiment scripts
-  echo "export AZ_A_INSTANCES_IP='${join(" ", aws_instance.az_a_ec2[*].private_ip)}'" >> /home/$USERNAME/.bashrc
-  echo "export AZ_A_INSTANCES_ID='${join(" ", aws_instance.az_a_ec2[*].id)}'" >> /home/$USERNAME/.bashrc
-  echo "export AZ_C_INSTANCES_IP='${join(" ", aws_instance.az_c_ec2[*].private_ip)}'" >> /home/$USERNAME/.bashrc
-  echo "export AZ_C_INSTANCES_ID='${join(" ", aws_instance.az_c_ec2[*].id)}'" >> /home/$USERNAME/.bashrc
-  echo "export AZ_A_VOLUME_ID='${join(" ", aws_ebs_volume.az_a_volume[*].id)}'" >> /home/$USERNAME/.bashrc
-  echo "export AZ_C_VOLUME_ID='${join(" ", aws_ebs_volume.az_c_volume[*].id)}'" >> /home/$USERNAME/.bashrc
-  echo "export REGION='${var.region}'" >> /home/$USERNAME/.bashrc
+# Environment variables for experiment scripts
+echo "export AZ_A_INSTANCES_IP='${join(" ", aws_instance.az_a_ec2[*].private_ip)}'" >> /home/$USERNAME/.bashrc
+echo "export AZ_A_INSTANCES_ID='${join(" ", aws_instance.az_a_ec2[*].id)}'" >> /home/$USERNAME/.bashrc
+echo "export AZ_C_INSTANCES_IP='${join(" ", aws_instance.az_c_ec2[*].private_ip)}'" >> /home/$USERNAME/.bashrc
+echo "export AZ_C_INSTANCES_ID='${join(" ", aws_instance.az_c_ec2[*].id)}'" >> /home/$USERNAME/.bashrc
+echo "export AZ_A_VOLUME_ID='${join(" ", aws_ebs_volume.az_a_volume[*].id)}'" >> /home/$USERNAME/.bashrc
+echo "export AZ_C_VOLUME_ID='${join(" ", aws_ebs_volume.az_c_volume[*].id)}'" >> /home/$USERNAME/.bashrc
+echo "export REGION='${var.region}'" >> /home/$USERNAME/.bashrc
 
-  # EFS mount (if enabled)
-  %{ if var.enable_efs_module == true }
-  mkdir -p /mnt/efs
-  echo "export EFS_ID='${module.efs[0].id}'" >> /home/$USERNAME/.bashrc
-  mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${module.efs[0].dns_name}:/ /mnt/efs
-  chown $USERNAME:$USERNAME /mnt/efs -R
-  %{ else }
-  echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
-  %{ endif }
+# EFS mount (if enabled)
+%{ if var.enable_efs_module == true }
+mkdir -p /mnt/efs
+echo "export EFS_ID='${module.efs[0].id}'" >> /home/$USERNAME/.bashrc
+mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${module.efs[0].dns_name}:/ /mnt/efs
+chown $USERNAME:$USERNAME /mnt/efs -R
+%{ else }
+echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
+%{ endif }
 
-  # Update criu_workload repo
-  cd /opt/criu_workload && git pull origin main || true
-  chown -R $USERNAME:$USERNAME /opt/criu_workload
+# Update criu_workload repo
+export HOME=/root
+git config --global --add safe.directory /opt/criu_workload
+cd /opt/criu_workload && git pull origin main || true
+chown -R $USERNAME:$USERNAME /opt/criu_workload
 
-  # Generate servers.yaml with instance IPs
-  cat <<FOE > /opt/criu_workload/config/servers.yaml
+# Generate servers.yaml with instance IPs
+cat <<FOE > /opt/criu_workload/config/servers.yaml
 # Auto-generated server configuration
 # AZ-A instances: ${join(", ", aws_instance.az_a_ec2[*].private_ip)}
 # AZ-C instances: ${join(", ", aws_instance.az_c_ec2[*].private_ip)}
@@ -132,8 +133,8 @@ all_nodes:
       name: "az-c-node-${idx}"
 %{ endfor ~}
 FOE
-  chown $USERNAME:$USERNAME /opt/criu_workload/config/servers.yaml
-  EOF
+chown $USERNAME:$USERNAME /opt/criu_workload/config/servers.yaml
+EOF
 
   depends_on = [ aws_instance.az_a_ec2, aws_instance.az_c_ec2, module.efs ]
 }
@@ -161,53 +162,54 @@ resource "aws_instance" "az_a_ec2" {
   }
   iam_instance_profile = aws_iam_instance_profile.ec2_instance_profile.name
   user_data = <<-EOF
-  #!/bin/bash
-  # AZ-A EC2 userdata
-  # Note: Most dependencies are pre-installed in the AMI (ami_setup.sh)
-  # This script only handles dynamic configuration (SSH keys, mounts)
+#!/bin/bash
+# AZ-A EC2 userdata
+# Note: Most dependencies are pre-installed in the AMI (ami_setup.sh)
+# This script only handles dynamic configuration (SSH keys, mounts)
 
-  sudo su
-  export USERNAME="ubuntu"
+export USERNAME="ubuntu"
 
-  # Ephemeral storage mount (if enabled)
-  %{ if var.enable_ephemeral_block_device == true }
-  mkfs.ext4 /dev/nvme1n1
-  mkdir -p /mnt/ephemeral
-  mount /dev/nvme1n1 /mnt/ephemeral
-  chmod 777 /mnt/ephemeral -R
-  %{ endif }
+# Ephemeral storage mount (if enabled)
+%{ if var.enable_ephemeral_block_device == true }
+mkfs.ext4 /dev/nvme1n1
+mkdir -p /mnt/ephemeral
+mount /dev/nvme1n1 /mnt/ephemeral
+chmod 777 /mnt/ephemeral -R
+%{ endif }
 
-  # SSH key setup (dynamically generated)
-  echo "${tls_private_key.ssh_key.public_key_openssh}" >> /home/$USERNAME/.ssh/authorized_keys
-  echo "${tls_private_key.ssh_key.public_key_openssh}" >> /root/.ssh/authorized_keys
-  echo "${tls_private_key.ssh_key.private_key_openssh}" >> /home/$USERNAME/.ssh/id_ed25519
-  echo "${tls_private_key.ssh_key.private_key_openssh}" >> /root/.ssh/id_ed25519
-  chown $USERNAME:$USERNAME /home/$USERNAME/.ssh -R
-  chown root:root /root/.ssh -R
-  chmod 600 /home/$USERNAME/.ssh/id_ed25519
-  chmod 600 /root/.ssh/id_ed25519
-  echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
-  systemctl restart sshd
-  cat <<'FOE' >> /home/$USERNAME/.ssh/config
+# SSH key setup (dynamically generated)
+echo "${tls_private_key.ssh_key.public_key_openssh}" >> /home/$USERNAME/.ssh/authorized_keys
+echo "${tls_private_key.ssh_key.public_key_openssh}" >> /root/.ssh/authorized_keys
+echo "${tls_private_key.ssh_key.private_key_openssh}" >> /home/$USERNAME/.ssh/id_ed25519
+echo "${tls_private_key.ssh_key.private_key_openssh}" >> /root/.ssh/id_ed25519
+chown $USERNAME:$USERNAME /home/$USERNAME/.ssh -R
+chown root:root /root/.ssh -R
+chmod 600 /home/$USERNAME/.ssh/id_ed25519
+chmod 600 /root/.ssh/id_ed25519
+echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
+systemctl restart ssh || systemctl restart sshd
+cat <<'FOE' >> /home/$USERNAME/.ssh/config
 Host *
     StrictHostKeyChecking no
     UserKnownHostsFile=/dev/null
 FOE
 
-  # EFS mount (if enabled)
-  %{ if var.enable_efs_module == true }
-  mkdir -p /mnt/efs
-  echo "export EFS_ID='${module.efs[0].id}'" >> /home/$USERNAME/.bashrc
-  mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${module.efs[0].dns_name}:/ /mnt/efs
-  chown $USERNAME:$USERNAME /mnt/efs -R
-  %{ else }
-  echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
-  %{ endif }
+# EFS mount (if enabled)
+%{ if var.enable_efs_module == true }
+mkdir -p /mnt/efs
+echo "export EFS_ID='${module.efs[0].id}'" >> /home/$USERNAME/.bashrc
+mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${module.efs[0].dns_name}:/ /mnt/efs
+chown $USERNAME:$USERNAME /mnt/efs -R
+%{ else }
+echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
+%{ endif }
 
-  # Update criu_workload repo
-  cd /opt/criu_workload && git pull origin main || true
-  chown -R $USERNAME:$USERNAME /opt/criu_workload
-  EOF
+# Update criu_workload repo
+export HOME=/root
+git config --global --add safe.directory /opt/criu_workload
+cd /opt/criu_workload && git pull origin main || true
+chown -R $USERNAME:$USERNAME /opt/criu_workload
+EOF
 
   depends_on = [ module.efs ]
 }
@@ -235,53 +237,54 @@ resource "aws_instance" "az_c_ec2" {
   }
   iam_instance_profile = aws_iam_instance_profile.ec2_instance_profile.name
   user_data = <<-EOF
-  #!/bin/bash
-  # AZ-C EC2 userdata
-  # Note: Most dependencies are pre-installed in the AMI (ami_setup.sh)
-  # This script only handles dynamic configuration (SSH keys, mounts)
+#!/bin/bash
+# AZ-C EC2 userdata
+# Note: Most dependencies are pre-installed in the AMI (ami_setup.sh)
+# This script only handles dynamic configuration (SSH keys, mounts)
 
-  sudo su
-  export USERNAME="ubuntu"
+export USERNAME="ubuntu"
 
-  # Ephemeral storage mount (if enabled)
-  %{ if var.enable_ephemeral_block_device == true }
-  mkfs.ext4 /dev/nvme1n1
-  mkdir -p /mnt/ephemeral
-  mount /dev/nvme1n1 /mnt/ephemeral
-  chmod 777 /mnt/ephemeral -R
-  %{ endif }
+# Ephemeral storage mount (if enabled)
+%{ if var.enable_ephemeral_block_device == true }
+mkfs.ext4 /dev/nvme1n1
+mkdir -p /mnt/ephemeral
+mount /dev/nvme1n1 /mnt/ephemeral
+chmod 777 /mnt/ephemeral -R
+%{ endif }
 
-  # SSH key setup (dynamically generated)
-  echo "${tls_private_key.ssh_key.public_key_openssh}" >> /home/$USERNAME/.ssh/authorized_keys
-  echo "${tls_private_key.ssh_key.public_key_openssh}" >> /root/.ssh/authorized_keys
-  echo "${tls_private_key.ssh_key.private_key_openssh}" >> /home/$USERNAME/.ssh/id_ed25519
-  echo "${tls_private_key.ssh_key.private_key_openssh}" >> /root/.ssh/id_ed25519
-  chown $USERNAME:$USERNAME /home/$USERNAME/.ssh -R
-  chown root:root /root/.ssh -R
-  chmod 600 /home/$USERNAME/.ssh/id_ed25519
-  chmod 600 /root/.ssh/id_ed25519
-  echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
-  systemctl restart sshd
-  cat <<'FOE' >> /home/$USERNAME/.ssh/config
+# SSH key setup (dynamically generated)
+echo "${tls_private_key.ssh_key.public_key_openssh}" >> /home/$USERNAME/.ssh/authorized_keys
+echo "${tls_private_key.ssh_key.public_key_openssh}" >> /root/.ssh/authorized_keys
+echo "${tls_private_key.ssh_key.private_key_openssh}" >> /home/$USERNAME/.ssh/id_ed25519
+echo "${tls_private_key.ssh_key.private_key_openssh}" >> /root/.ssh/id_ed25519
+chown $USERNAME:$USERNAME /home/$USERNAME/.ssh -R
+chown root:root /root/.ssh -R
+chmod 600 /home/$USERNAME/.ssh/id_ed25519
+chmod 600 /root/.ssh/id_ed25519
+echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
+systemctl restart ssh || systemctl restart sshd
+cat <<'FOE' >> /home/$USERNAME/.ssh/config
 Host *
     StrictHostKeyChecking no
     UserKnownHostsFile=/dev/null
 FOE
 
-  # EFS mount (if enabled)
-  %{ if var.enable_efs_module == true }
-  mkdir -p /mnt/efs
-  echo "export EFS_ID='${module.efs[0].id}'" >> /home/$USERNAME/.bashrc
-  mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${module.efs[0].dns_name}:/ /mnt/efs
-  chown $USERNAME:$USERNAME /mnt/efs -R
-  %{ else }
-  echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
-  %{ endif }
+# EFS mount (if enabled)
+%{ if var.enable_efs_module == true }
+mkdir -p /mnt/efs
+echo "export EFS_ID='${module.efs[0].id}'" >> /home/$USERNAME/.bashrc
+mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${module.efs[0].dns_name}:/ /mnt/efs
+chown $USERNAME:$USERNAME /mnt/efs -R
+%{ else }
+echo "export EFS_ID=''" >> /home/$USERNAME/.bashrc
+%{ endif }
 
-  # Update criu_workload repo
-  cd /opt/criu_workload && git pull origin main || true
-  chown -R $USERNAME:$USERNAME /opt/criu_workload
-  EOF
+# Update criu_workload repo
+export HOME=/root
+git config --global --add safe.directory /opt/criu_workload
+cd /opt/criu_workload && git pull origin main || true
+chown -R $USERNAME:$USERNAME /opt/criu_workload
+EOF
 
   depends_on = [ module.efs ]
 }
