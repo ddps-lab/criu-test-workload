@@ -935,11 +935,13 @@ class CheckpointManager:
             echo "Stopping background strace..." >> {strace_file}.info
 
             # Find and kill ALL strace processes (may have multiple)
-            STRACE_PIDS=$(pgrep -f 'strace' 2>/dev/null | tr '\\n' ' ') || true
+            STRACE_PIDS=$(pgrep -x strace 2>/dev/null | tr '\\n' ' ') || true
             if [ -n "$STRACE_PIDS" ]; then
                 echo "Found strace PIDs: $STRACE_PIDS" >> {strace_file}.info
-                # Kill all strace processes using pkill (simpler than xargs)
-                sudo pkill -9 -f 'strace' >> {strace_file}.info 2>&1 || true
+                # Kill each strace process by PID (safer than pkill -f which may kill SSH session)
+                for p in $STRACE_PIDS; do
+                    sudo kill -9 $p 2>/dev/null || true
+                done
                 # Wait for strace to fully terminate
                 sleep 1
                 echo "Strace stopped" >> {strace_file}.info
