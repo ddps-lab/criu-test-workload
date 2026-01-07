@@ -33,7 +33,7 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lib import CRIUExperiment, ConfigLoader
-from workloads.memory_workload import MemoryWorkload, WorkloadFactory
+from workloads import WorkloadFactory
 
 
 def setup_logging(level: str = "INFO"):
@@ -85,7 +85,7 @@ def parse_args():
         '--workload', '-w',
         type=str,
         default='memory',
-        choices=['memory'],  # Add more as implemented
+        choices=['memory', 'matmul', 'redis', 'ml_training', 'dataproc', 'video'],
         help='Workload type to run'
     )
     parser.add_argument(
@@ -105,6 +105,120 @@ def parse_args():
         type=float,
         default=None,
         help='Interval between allocations in seconds'
+    )
+
+    # MatMul workload
+    parser.add_argument(
+        '--matrix-size',
+        type=int,
+        default=None,
+        help='Matrix size NxN for matmul (default: 2048)'
+    )
+    parser.add_argument(
+        '--iterations',
+        type=int,
+        default=None,
+        help='Number of iterations, 0=infinite (matmul/dataproc)'
+    )
+
+    # Redis workload
+    parser.add_argument(
+        '--redis-port',
+        type=int,
+        default=None,
+        help='Redis server port (default: 6379)'
+    )
+    parser.add_argument(
+        '--num-keys',
+        type=int,
+        default=None,
+        help='Number of keys for Redis (default: 100000)'
+    )
+    parser.add_argument(
+        '--value-size',
+        type=int,
+        default=None,
+        help='Redis value size in bytes (default: 1024)'
+    )
+
+    # Video workload
+    parser.add_argument(
+        '--resolution',
+        type=str,
+        default=None,
+        help='Video resolution WxH (default: 1920x1080)'
+    )
+    parser.add_argument(
+        '--fps',
+        type=int,
+        default=None,
+        help='Frames per second (default: 30)'
+    )
+    parser.add_argument(
+        '--duration',
+        type=int,
+        default=None,
+        help='Duration in seconds for video (default: 300)'
+    )
+    parser.add_argument(
+        '--video-mode',
+        type=str,
+        choices=['file', 'live'],
+        default=None,
+        help='Video output mode (default: live)'
+    )
+
+    # DataProc workload
+    parser.add_argument(
+        '--num-rows',
+        type=int,
+        default=None,
+        help='Number of rows for dataproc (default: 1000000)'
+    )
+    parser.add_argument(
+        '--num-cols',
+        type=int,
+        default=None,
+        help='Number of columns for dataproc (default: 50)'
+    )
+    parser.add_argument(
+        '--operations',
+        type=int,
+        default=None,
+        help='Number of operations, 0=infinite (dataproc)'
+    )
+
+    # ML Training workload
+    parser.add_argument(
+        '--model-size',
+        type=str,
+        choices=['small', 'medium', 'large'],
+        default=None,
+        help='Model size for ml_training (default: medium)'
+    )
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=None,
+        help='Training batch size (default: 64)'
+    )
+    parser.add_argument(
+        '--epochs',
+        type=int,
+        default=None,
+        help='Number of epochs, 0=infinite (ml_training)'
+    )
+    parser.add_argument(
+        '--learning-rate',
+        type=float,
+        default=None,
+        help='Learning rate for ml_training (default: 0.001)'
+    )
+    parser.add_argument(
+        '--dataset-size',
+        type=int,
+        default=None,
+        help='ML training dataset size (overrides model-size default)'
     )
 
     # Checkpoint strategy
@@ -132,11 +246,20 @@ def parse_args():
         action='store_true',
         help='Enable lazy-pages mode'
     )
-    parser.add_argument(
+
+    # Checkpoint trigger options (mutually exclusive)
+    trigger_group = parser.add_mutually_exclusive_group()
+    trigger_group.add_argument(
         '--wait-before-dump',
         type=int,
         default=None,
-        help='Seconds to wait before full dump (for strategy: full)'
+        help='Seconds to wait before full dump (time-based trigger)'
+    )
+    trigger_group.add_argument(
+        '--target-memory-mb',
+        type=int,
+        default=None,
+        help='Wait until process VmRSS reaches this MB before dump (memory-based trigger)'
     )
 
     # Transfer configuration
@@ -211,12 +334,58 @@ def build_overrides(args) -> dict:
     # Workload overrides
     if args.workload:
         overrides['experiment.workload_type'] = args.workload
+
+    # Memory workload
     if args.mb_size:
         overrides['workload.mb_size'] = args.mb_size
     if args.max_memory:
         overrides['workload.max_memory_mb'] = args.max_memory
     if args.interval:
         overrides['workload.interval'] = args.interval
+
+    # MatMul workload
+    if args.matrix_size:
+        overrides['workload.matrix_size'] = args.matrix_size
+    if args.iterations is not None:
+        overrides['workload.iterations'] = args.iterations
+
+    # Redis workload
+    if args.redis_port:
+        overrides['workload.redis_port'] = args.redis_port
+    if args.num_keys:
+        overrides['workload.num_keys'] = args.num_keys
+    if args.value_size:
+        overrides['workload.value_size'] = args.value_size
+
+    # Video workload
+    if args.resolution:
+        overrides['workload.resolution'] = args.resolution
+    if args.fps:
+        overrides['workload.fps'] = args.fps
+    if args.duration:
+        overrides['workload.duration'] = args.duration
+    if args.video_mode:
+        overrides['workload.mode'] = args.video_mode
+
+    # DataProc workload
+    if args.num_rows:
+        overrides['workload.num_rows'] = args.num_rows
+    if args.num_cols:
+        overrides['workload.num_cols'] = args.num_cols
+    if args.operations is not None:
+        overrides['workload.operations'] = args.operations
+
+    # ML Training workload
+    if args.model_size:
+        overrides['workload.model_size'] = args.model_size
+    if args.batch_size:
+        overrides['workload.batch_size'] = args.batch_size
+    if args.epochs is not None:
+        overrides['workload.epochs'] = args.epochs
+    if args.learning_rate:
+        overrides['workload.learning_rate'] = args.learning_rate
+    if args.dataset_size:
+        overrides['workload.dataset_size'] = args.dataset_size
 
     # Checkpoint strategy overrides
     if args.strategy:
@@ -229,6 +398,8 @@ def build_overrides(args) -> dict:
         overrides['checkpoint.strategy.lazy_pages'] = True
     if args.wait_before_dump is not None:
         overrides['checkpoint.strategy.wait_before_dump'] = args.wait_before_dump
+    if args.target_memory_mb is not None:
+        overrides['checkpoint.strategy.target_memory_mb'] = args.target_memory_mb
 
     # Transfer overrides
     if args.transfer_method:

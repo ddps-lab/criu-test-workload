@@ -287,7 +287,8 @@ class CheckpointManager:
 
         raise TimeoutError(f"Workload not ready after {timeout}s")
 
-    def pre_dump(self, host: str, pid: str, iteration: int, username: str = 'ubuntu') -> Dict[str, Any]:
+    def pre_dump(self, host: str, pid: str, iteration: int, username: str = 'ubuntu',
+                 workload_type: str = None) -> Dict[str, Any]:
         """
         Perform CRIU pre-dump.
 
@@ -296,6 +297,7 @@ class CheckpointManager:
             pid: Process PID
             iteration: Pre-dump iteration number (1-indexed)
             username: SSH username
+            workload_type: Type of workload (for workload-specific flags)
 
         Returns:
             Dictionary with pre-dump metrics
@@ -311,6 +313,10 @@ class CheckpointManager:
         log_file = f"{checkpoint_dir}/criu-pre-dump.log"
         criu_cmd = f"sudo criu pre-dump -D {checkpoint_dir} -t {pid} --shell-job --track-mem"
         criu_cmd += f" --log-file {log_file} -v4"
+
+        # Redis needs --tcp-established for Python-Redis TCP connection
+        if workload_type == 'redis':
+            criu_cmd += " --tcp-established"
 
         # Add --prev-images-dir for iterations after the first
         if iteration > 1:
@@ -345,7 +351,8 @@ class CheckpointManager:
         }
 
     def final_dump(self, host: str, pid: str, last_iteration: int, lazy_pages: bool = False,
-                   page_server_port: int = 22222, username: str = 'ubuntu') -> Dict[str, Any]:
+                   page_server_port: int = 22222, username: str = 'ubuntu',
+                   workload_type: str = None) -> Dict[str, Any]:
         """
         Perform final CRIU dump.
 
@@ -356,6 +363,7 @@ class CheckpointManager:
             lazy_pages: Enable lazy-pages mode
             page_server_port: Port for lazy-pages server
             username: SSH username
+            workload_type: Type of workload (for workload-specific flags)
 
         Returns:
             Dictionary with dump metrics
@@ -372,6 +380,10 @@ class CheckpointManager:
         log_file = f"{checkpoint_dir}/criu-dump.log"
         criu_cmd = f"sudo criu dump -D {checkpoint_dir} -t {pid} --shell-job --track-mem"
         criu_cmd += f" --log-file {log_file} -v4"
+
+        # Redis needs --tcp-established for Python-Redis TCP connection
+        if workload_type == 'redis':
+            criu_cmd += " --tcp-established"
 
         # Add --prev-images-dir if there were pre-dumps
         if last_iteration > 0:
@@ -444,7 +456,8 @@ class CheckpointManager:
 
     def restore(self, host: str, checkpoint_dir: str, lazy_pages: bool = False,
                 page_server_host: Optional[str] = None, page_server_port: int = 22222,
-                username: str = 'ubuntu', pid_file: Optional[str] = None) -> Dict[str, Any]:
+                username: str = 'ubuntu', pid_file: Optional[str] = None,
+                workload_type: str = None) -> Dict[str, Any]:
         """
         Restore process from checkpoint.
 
@@ -456,6 +469,7 @@ class CheckpointManager:
             page_server_port: Page server port
             username: SSH username
             pid_file: Optional path to write restored process PID
+            workload_type: Type of workload (for workload-specific flags)
 
         Returns:
             Dictionary with restore metrics
@@ -480,6 +494,10 @@ class CheckpointManager:
         # --pidfile: write restored process PID to file for verification
         criu_cmd = f"sudo criu restore -D {checkpoint_dir} --shell-job -d"
         criu_cmd += f" --log-file {restore_log_file} -v4"
+
+        # Redis needs --tcp-established for Python-Redis TCP connection
+        if workload_type == 'redis':
+            criu_cmd += " --tcp-established"
 
         if pid_file:
             criu_cmd += f" --pidfile {pid_file}"

@@ -115,7 +115,8 @@ def run_ml_training_workload(
     batch_size: int = 64,
     epochs: int = 0,  # 0 = infinite
     learning_rate: float = 0.001,
-    working_dir: str = '.'
+    working_dir: str = '.',
+    dataset_size: int = None  # Override dataset size
 ):
     """
     Main ML training workload.
@@ -126,6 +127,7 @@ def run_ml_training_workload(
         epochs: Number of epochs (0 for infinite)
         learning_rate: Optimizer learning rate
         working_dir: Working directory for signal files
+        dataset_size: Override default dataset size (None = use model default)
     """
     if not HAS_TORCH:
         print("[MLTrain] ERROR: PyTorch not installed. Please install with: pip3 install torch")
@@ -141,6 +143,12 @@ def run_ml_training_workload(
 
     # Get model configuration
     config = get_model_config(model_size)
+
+    # Override dataset size if specified
+    if dataset_size is not None:
+        config['dataset_size'] = dataset_size
+        print(f"[MLTrain] Dataset size overridden to: {dataset_size}")
+
     print(f"[MLTrain] Model config: input={config['input_size']}, hidden={config['hidden_sizes']}, output={config['output_size']}")
     print(f"[MLTrain] Dataset size: {config['dataset_size']}")
 
@@ -248,6 +256,12 @@ def main():
         default='.',
         help='Working directory for signal files'
     )
+    parser.add_argument(
+        '--dataset-size',
+        type=int,
+        default=None,
+        help='Override dataset size (default: depends on model-size)'
+    )
 
     args = parser.parse_args()
 
@@ -256,7 +270,8 @@ def main():
         batch_size=args.batch_size,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
-        working_dir=args.working_dir
+        working_dir=args.working_dir,
+        dataset_size=args.dataset_size
     )
 
 

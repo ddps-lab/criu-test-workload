@@ -199,6 +199,9 @@ class CRIUExperiment:
 
         logger.info(f"Running {num_iterations} pre-dump iterations with {interval}s interval")
 
+        # Get workload type for CRIU flags
+        workload_type = self.experiment_config.get('workload_type', 'memory')
+
         for i in range(1, num_iterations + 1):
             iteration_start = time.time()
 
@@ -208,7 +211,8 @@ class CRIUExperiment:
                 self.source_host,
                 self.workload_pid,
                 i,
-                self.ssh_user
+                self.ssh_user,
+                workload_type=workload_type
             )
 
             if not result['success']:
@@ -249,19 +253,71 @@ class CRIUExperiment:
         """Execute full dump (no pre-dumps)."""
         logger.info("Running full dump strategy (no pre-dumps)")
 
-        # Optional: wait before dump
-        wait_time = self.checkpoint_config['strategy'].get('wait_before_dump', 0)
-        if wait_time > 0:
+        strategy = self.checkpoint_config['strategy']
+
+        # Check for memory-based or time-based trigger
+        target_memory_mb = strategy.get('target_memory_mb')
+        wait_time = strategy.get('wait_before_dump', 0)
+
+        if target_memory_mb is not None:
+            # Memory-based trigger: wait until process memory reaches target
+            logger.info(f"Waiting for process memory to reach {target_memory_mb} MB...")
+            if not self._wait_for_target_memory(target_memory_mb):
+                logger.warning("Timeout waiting for target memory, proceeding with dump anyway")
+        elif wait_time > 0:
+            # Time-based trigger: wait fixed duration
             logger.info(f"Waiting {wait_time}s before dump...")
             time.sleep(wait_time)
 
         self._run_final_dump()
+
+    def _wait_for_target_memory(self, target_mb: int, timeout: int = 600) -> bool:
+        """
+        Wait until process memory (VmRSS) reaches target size.
+
+        Args:
+            target_mb: Target memory in MB
+            timeout: Maximum wait time in seconds
+
+        Returns:
+            True if target reached, False if timeout
+        """
+        start_time = time.time()
+        target_kb = target_mb * 1024
+        check_interval = 2.0
+
+        ssh_client = self.checkpoint_mgr.get_ssh_client(self.source_host, self.ssh_user)
+
+        while time.time() - start_time < timeout:
+            # Get VmRSS from /proc/{pid}/status
+            cmd = f"grep VmRSS /proc/{self.workload_pid}/status | awk '{{print $2}}'"
+            stdout, stderr, status = ssh_client.execute(cmd)
+
+            if status == 0 and stdout.strip():
+                try:
+                    current_kb = int(stdout.strip())
+                    current_mb = current_kb / 1024
+                    logger.info(f"[Memory Monitor] Current: {current_mb:.1f} MB / Target: {target_mb} MB")
+
+                    if current_kb >= target_kb:
+                        logger.info(f"Target memory reached: {current_mb:.1f} MB")
+                        return True
+                except ValueError:
+                    pass
+
+            time.sleep(check_interval)
+
+        logger.warning(f"Timeout after {timeout}s waiting for target memory ({target_mb} MB)")
+        return False
 
     def _run_final_dump(self):
         """Perform final CRIU dump."""
         strategy = self.checkpoint_config['strategy']
         lazy_pages = strategy.get('lazy_pages', False)
         page_server_port = strategy.get('page_server_port', 22222)
+
+        # Get workload type for CRIU flags
+        workload_type = self.experiment_config.get('workload_type', 'memory')
 
         logger.info(f"Performing final dump (lazy_pages={lazy_pages})")
 
@@ -273,7 +329,8 @@ class CRIUExperiment:
             self.checkpoint_iteration,
             lazy_pages,
             page_server_port,
-            self.ssh_user
+            self.ssh_user,
+            workload_type=workload_type
         )
 
         if not result['success']:
@@ -347,6 +404,9 @@ class CRIUExperiment:
         lazy_pages = strategy.get('lazy_pages', False)
         page_server_port = strategy.get('page_server_port', 22222)
 
+        # Get workload type for CRIU flags
+        workload_type = self.experiment_config.get('workload_type', 'memory')
+
         # Determine checkpoint directory on destination
         # This depends on transfer method
         transfer_method = self.transfer_config.get('method')
@@ -372,7 +432,8 @@ class CRIUExperiment:
             lazy_pages,
             self.source_host if lazy_pages else None,
             page_server_port,
-            self.ssh_user
+            self.ssh_user,
+            workload_type=workload_type
         )
 
         restore_metric = self.metrics.stop_timer('restore')

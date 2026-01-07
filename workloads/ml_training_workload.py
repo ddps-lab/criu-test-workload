@@ -75,7 +75,7 @@ def generate_synthetic_data(config, batch_size):
     return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 
-def run_ml_training_workload(model_size, batch_size, epochs, learning_rate, working_dir):
+def run_ml_training_workload(model_size, batch_size, epochs, learning_rate, working_dir, dataset_size=None):
     if not HAS_TORCH:
         print("[MLTrain] ERROR: PyTorch not installed")
         sys.exit(1)
@@ -85,6 +85,9 @@ def run_ml_training_workload(model_size, batch_size, epochs, learning_rate, work
     print(f"[MLTrain] Config: model_size={model_size}, batch_size={batch_size}")
 
     config = get_model_config(model_size)
+    if dataset_size is not None:
+        config['dataset_size'] = dataset_size
+        print(f"[MLTrain] Dataset size overridden to: {dataset_size}")
     model = SimpleNN(config['input_size'], config['hidden_sizes'], config['output_size']).to(device)
     num_params = sum(p.numel() for p in model.parameters())
     print(f"[MLTrain] Model parameters: {num_params:,}")
@@ -135,9 +138,10 @@ def main():
     parser.add_argument('--epochs', type=int, default=0)
     parser.add_argument('--learning-rate', type=float, default=0.001)
     parser.add_argument('--working_dir', type=str, default='.')
+    parser.add_argument('--dataset-size', type=int, default=None)
 
     args = parser.parse_args()
-    run_ml_training_workload(args.model_size, args.batch_size, args.epochs, args.learning_rate, args.working_dir)
+    run_ml_training_workload(args.model_size, args.batch_size, args.epochs, args.learning_rate, args.working_dir, args.dataset_size)
 
 
 if __name__ == '__main__':
@@ -164,6 +168,7 @@ class MLTrainingWorkload(BaseWorkload):
         self.batch_size = config.get('batch_size', 64)
         self.epochs = config.get('epochs', 0)
         self.learning_rate = config.get('learning_rate', 0.001)
+        self.dataset_size = config.get('dataset_size', None)
 
     def get_standalone_script_name(self) -> str:
         return 'ml_training_standalone.py'
@@ -178,6 +183,8 @@ class MLTrainingWorkload(BaseWorkload):
         cmd += f" --epochs {self.epochs}"
         cmd += f" --learning-rate {self.learning_rate}"
         cmd += f" --working_dir {self.working_dir}"
+        if self.dataset_size is not None:
+            cmd += f" --dataset-size {self.dataset_size}"
         return cmd
 
     def get_dependencies(self) -> list[str]:
