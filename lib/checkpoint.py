@@ -834,10 +834,12 @@ class CheckpointManager:
 
         # Source log patterns: pre-dump, dump, page-server, workload status and stdout
         source_patterns = ['criu-pre-dump.log', 'criu-dump.log', 'criu-page-server.log',
-                          'workload_status_pre_dump.txt', 'workload_stdout_pre_dump.log']
+                          'workload_status_pre_dump.txt', 'workload_stdout_pre_dump.log',
+                          'workload_stdout_pre_dump.log.info']
         # Dest log patterns: restore, lazy-pages, workload status and stdout
         dest_patterns = ['criu-restore.log', 'criu-lazy-pages.log',
-                        'workload_status_post_restore.txt', 'workload_stdout_post_restore.log']
+                        'workload_status_post_restore.txt', 'workload_stdout_post_restore.log',
+                        'workload_stdout_post_restore.log.info']
 
         # Collect from source node
         source_client = self.get_ssh_client(source_host, username)
@@ -846,7 +848,7 @@ class CheckpointManager:
 
         # Find checkpoint directories and collect source-specific logs
         stdout, stderr, status = source_client.execute(
-            f"find {self.working_dir} \\( -name '*.log' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
+            f"find {self.working_dir} \\( -name '*.log' -o -name '*.log.info' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
         )
 
         if status == 0 and stdout.strip():
@@ -868,7 +870,7 @@ class CheckpointManager:
         dest_dir.mkdir(exist_ok=True)
 
         stdout, stderr, status = dest_client.execute(
-            f"find {self.working_dir} \\( -name '*.log' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
+            f"find {self.working_dir} \\( -name '*.log' -o -name '*.log.info' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
         )
 
         if status == 0 and stdout.strip():
@@ -890,7 +892,7 @@ class CheckpointManager:
         return collected
 
     def capture_workload_log(self, host: str, label: str, username: str = 'ubuntu',
-                             strace_duration: float = 2.0) -> str:
+                             strace_duration: float = 6.0) -> str:
         """
         Capture workload status and stdout via strace.
 
@@ -912,10 +914,42 @@ class CheckpointManager:
 
         # First, capture stdout via strace for a short duration
         # Find workload PID and run strace
+        # Note: strace captures write syscalls even if stdout is /dev/null
+        # Use longer duration (6s) since some workloads print every 5 seconds
         strace_cmd = f"""
-        PID=$(pgrep -f 'standalone.py|ffmpeg|redis-server' 2>/dev/null | head -1)
+        # Find workload process - try multiple patterns
+        PID=""
+        for pattern in "standalone.py" "python3.*workload" "ffmpeg" "redis-server"; do
+            PID=$(pgrep -f "$pattern" 2>/dev/null | head -1)
+            if [ -n "$PID" ]; then
+                break
+            fi
+        done
+
+        echo "=== Strace Debug Info ===" > {strace_file}.info
+        echo "Timestamp: $(date -Iseconds)" >> {strace_file}.info
+        echo "Looking for workload process..." >> {strace_file}.info
+
         if [ -n "$PID" ]; then
-            sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 200 -o {strace_file} 2>/dev/null || true
+            echo "Found PID: $PID" >> {strace_file}.info
+            echo "Process info:" >> {strace_file}.info
+            ps -p $PID -o pid,ppid,cmd 2>&1 >> {strace_file}.info
+
+            echo "Attaching strace for {strace_duration}s..." >> {strace_file}.info
+
+            # Run strace with timeout, redirect strace's own stderr to .info
+            sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 1000 -o {strace_file} 2>> {strace_file}.info
+            STRACE_EXIT=$?
+
+            echo "Strace exit code: $STRACE_EXIT" >> {strace_file}.info
+            echo "Strace output file:" >> {strace_file}.info
+            ls -la {strace_file} 2>&1 >> {strace_file}.info
+            echo "First 5 lines of strace output:" >> {strace_file}.info
+            head -5 {strace_file} 2>&1 >> {strace_file}.info
+        else
+            echo "No workload PID found" >> {strace_file}.info
+            echo "Running processes:" >> {strace_file}.info
+            ps aux | grep -E 'python|ffmpeg|redis' | grep -v grep >> {strace_file}.info 2>&1
         fi
         """
         client.execute(strace_cmd)
@@ -946,10 +980,19 @@ class CheckpointManager:
         cat {self.working_dir}/checkpoint_ready 2>/dev/null || echo "Not found" >> {status_file}
         echo "" >> {status_file}
 
-        # Include strace output if captured
-        if [ -f {strace_file} ]; then
+        # Include strace info and output if captured
+        if [ -f {strace_file}.info ]; then
+            echo "=== Strace Info ===" >> {status_file}
+            cat {strace_file}.info >> {status_file} 2>/dev/null
+            echo "" >> {status_file}
+        fi
+        if [ -f {strace_file} ] && [ -s {strace_file} ]; then
             echo "=== Workload Stdout (via strace) ===" >> {status_file}
             head -50 {strace_file} >> {status_file} 2>/dev/null
+            echo "" >> {status_file}
+        else
+            echo "=== Workload Stdout ===" >> {status_file}
+            echo "(strace log empty or not found)" >> {status_file}
             echo "" >> {status_file}
         fi
 
@@ -966,14 +1009,14 @@ class CheckpointManager:
             return ""
 
     def verify_restored_process(self, host: str, workload_type: str,
-                                 wait_time: float = 3.0, username: str = 'ubuntu') -> Dict[str, Any]:
+                                 wait_time: float = 6.0, username: str = 'ubuntu') -> Dict[str, Any]:
         """
         Verify restored process is running and capture post-restore log.
 
         Args:
             host: Remote host IP
             workload_type: Type of workload
-            wait_time: Time to wait before checking (allows process to run briefly)
+            wait_time: Time to wait/strace duration (6s default to catch output from 5s interval workloads)
             username: SSH username
 
         Returns:
@@ -999,6 +1042,7 @@ class CheckpointManager:
         pids = stdout.strip().split('\n') if is_running else []
 
         # Capture post-restore workload status (includes strace capture)
+        # Use wait_time as strace duration (default 6s to catch 5s interval outputs)
         post_log = self.capture_workload_log(host, 'post_restore', username, strace_duration=wait_time)
 
         result = {
