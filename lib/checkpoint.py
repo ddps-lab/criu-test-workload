@@ -935,7 +935,7 @@ class CheckpointManager:
             echo "Stopping background strace..." >> {strace_file}.info
 
             # Find and kill ALL strace processes (may have multiple)
-            STRACE_PIDS=$(pgrep -f 'strace' 2>/dev/null)
+            STRACE_PIDS=$(pgrep -f 'strace' 2>/dev/null || true)
             if [ -n "$STRACE_PIDS" ]; then
                 echo "Found strace PIDs: $STRACE_PIDS" >> {strace_file}.info
                 for pid in $STRACE_PIDS; do
@@ -956,24 +956,34 @@ class CheckpointManager:
             fi
 
             # Parse strace output to extract clean log lines
+            echo "Checking for raw file..." >> {strace_file}.info
             if [ -f {strace_file}.raw ]; then
                 echo "Parsing strace output from {strace_file}.raw" >> {strace_file}.info
                 ls -la {strace_file}.raw >> {strace_file}.info 2>&1
+                echo "First 3 lines of raw:" >> {strace_file}.info
+                head -3 {strace_file}.raw >> {strace_file}.info 2>&1
 
                 # Extract the string content from write(1, "...", N) or write(2, "...", N)
+                # Note: strace output format is: write(1, "content", len)
                 # Skip hex dump lines (start with " |") and newline-only writes
-                # Then join all content and split by actual newlines
-                grep '^write([12],' {strace_file}.raw 2>/dev/null | \\
-                    grep -oP 'write\\([12], "\\K[^"]*' | \\
+                grep '^write([12], "' {strace_file}.raw 2>/dev/null | \\
+                    sed 's/^write([12], "//; s/".*$//' | \\
                     grep -v '^\\\\n$' | \\
                     tr -d '\\n' | \\
                     sed 's/\\\\n/\\n/g' | \\
                     sed 's/\\\\t/\\t/g' | \\
-                    sed 's/\\\\r//g' > {strace_file}
+                    sed 's/\\\\r//g' > {strace_file} 2>> {strace_file}.info
+
+                # Ensure the file exists even if empty
+                touch {strace_file}
+
                 echo "Parsed strace output to clean log" >> {strace_file}.info
+                echo "Result file:" >> {strace_file}.info
+                ls -la {strace_file} >> {strace_file}.info 2>&1
                 wc -l {strace_file} >> {strace_file}.info 2>&1
             else
                 echo "No strace raw file found at {strace_file}.raw" >> {strace_file}.info
+                touch {strace_file}
             fi
             """
         else:
@@ -1006,13 +1016,14 @@ class CheckpointManager:
                     # Parse strace output
                     if [ -f {strace_file}.raw ]; then
                         # Skip hex dump lines and newline-only writes, join and split properly
-                        grep '^write([12],' {strace_file}.raw 2>/dev/null | \\
-                            grep -oP 'write\\([12], "\\K[^"]*' | \\
+                        grep '^write([12], "' {strace_file}.raw 2>/dev/null | \\
+                            sed 's/^write([12], "//; s/".*$//' | \\
                             grep -v '^\\\\n$' | \\
                             tr -d '\\n' | \\
                             sed 's/\\\\n/\\n/g' | \\
                             sed 's/\\\\t/\\t/g' | \\
-                            sed 's/\\\\r//g' > {strace_file}
+                            sed 's/\\\\r//g' > {strace_file} 2>> {strace_file}.info
+                        touch {strace_file}
                         echo "Parsed strace output to clean log" >> {strace_file}.info
                     fi
                 else
