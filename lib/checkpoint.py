@@ -961,8 +961,12 @@ class CheckpointManager:
                 ls -la {strace_file}.raw >> {strace_file}.info 2>&1
 
                 # Extract the string content from write(1, "...", N) or write(2, "...", N)
-                # Then convert escaped \\n to actual newlines
-                grep -oP 'write\\([12], "\\K[^"]*' {strace_file}.raw 2>/dev/null | \\
+                # Skip hex dump lines (start with " |") and newline-only writes
+                # Then join all content and split by actual newlines
+                grep '^write([12],' {strace_file}.raw 2>/dev/null | \\
+                    grep -oP 'write\\([12], "\\K[^"]*' | \\
+                    grep -v '^\\\\n$' | \\
+                    tr -d '\\n' | \\
                     sed 's/\\\\n/\\n/g' | \\
                     sed 's/\\\\t/\\t/g' | \\
                     sed 's/\\\\r//g' > {strace_file}
@@ -1001,7 +1005,11 @@ class CheckpointManager:
 
                     # Parse strace output
                     if [ -f {strace_file}.raw ]; then
-                        grep -oP 'write\\([12], "\\K[^"]*' {strace_file}.raw 2>/dev/null | \\
+                        # Skip hex dump lines and newline-only writes, join and split properly
+                        grep '^write([12],' {strace_file}.raw 2>/dev/null | \\
+                            grep -oP 'write\\([12], "\\K[^"]*' | \\
+                            grep -v '^\\\\n$' | \\
+                            tr -d '\\n' | \\
                             sed 's/\\\\n/\\n/g' | \\
                             sed 's/\\\\t/\\t/g' | \\
                             sed 's/\\\\r//g' > {strace_file}
