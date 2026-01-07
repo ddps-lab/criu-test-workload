@@ -935,19 +935,18 @@ class CheckpointManager:
             echo "Stopping background strace..." >> {strace_file}.info
 
             # Find and kill ALL strace processes (may have multiple)
-            STRACE_PIDS=$(pgrep -f 'strace' 2>/dev/null || true)
+            STRACE_PIDS=$(pgrep -f 'strace' 2>/dev/null | tr '\\n' ' ' || true)
             if [ -n "$STRACE_PIDS" ]; then
                 echo "Found strace PIDs: $STRACE_PIDS" >> {strace_file}.info
-                for pid in $STRACE_PIDS; do
-                    sudo kill -9 $pid 2>/dev/null || true
-                done
+                # Kill all strace processes at once
+                echo $STRACE_PIDS | xargs -r sudo kill -9 2>/dev/null || true
                 # Wait for strace to fully terminate
                 sleep 1
                 # Verify strace is gone
-                REMAINING=$(pgrep -f 'strace' 2>/dev/null || true)
+                REMAINING=$(pgrep -f 'strace' 2>/dev/null | tr '\\n' ' ' || true)
                 if [ -n "$REMAINING" ]; then
                     echo "WARNING: strace still running: $REMAINING" >> {strace_file}.info
-                    sudo kill -9 $REMAINING 2>/dev/null || true
+                    echo $REMAINING | xargs -r sudo kill -9 2>/dev/null || true
                     sleep 0.5
                 fi
                 echo "Strace stopped" >> {strace_file}.info
