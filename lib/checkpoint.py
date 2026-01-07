@@ -328,17 +328,30 @@ class CheckpointManager:
         stdout, stderr, status = client.execute(criu_cmd, timeout=120)
         duration = time.time() - start_time
 
+        # Fix permissions for rsync (CRIU creates files as root)
+        # Do this even on failure so we can collect logs
+        client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
+
         if status != 0:
-            logger.error(f"Pre-dump failed: {stderr}")
+            # Try to get more details from CRIU log
+            log_content = ""
+            log_stdout, _, log_status = client.execute(f"tail -30 {log_file} 2>/dev/null")
+            if log_status == 0:
+                log_content = log_stdout
+
+            error_msg = stderr if stderr else "Unknown error (check CRIU log)"
+            logger.error(f"Pre-dump failed: {error_msg}")
+            if log_content:
+                logger.error(f"CRIU log tail:\n{log_content}")
+
             return {
                 'success': False,
                 'iteration': iteration,
                 'duration': duration,
-                'error': stderr
+                'error': error_msg,
+                'log_file': log_file,
+                'log_content': log_content
             }
-
-        # Fix permissions for rsync (CRIU creates files as root)
-        client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
 
         logger.info(f"Pre-dump {iteration} completed in {duration:.2f}s")
 
@@ -429,13 +442,29 @@ class CheckpointManager:
             stdout, stderr, status = client.execute(criu_cmd, timeout=300)
 
             if status != 0:
-                logger.error(f"Final dump failed: {stderr}")
                 duration = time.time() - start_time
+
+                # Fix permissions so we can read the log
+                client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
+
+                # Try to get more details from CRIU log
+                log_content = ""
+                log_stdout, _, log_status = client.execute(f"tail -30 {log_file} 2>/dev/null")
+                if log_status == 0:
+                    log_content = log_stdout
+
+                error_msg = stderr if stderr else "Unknown error (check CRIU log)"
+                logger.error(f"Final dump failed: {error_msg}")
+                if log_content:
+                    logger.error(f"CRIU log tail:\n{log_content}")
+
                 return {
                     'success': False,
                     'iteration': iteration,
                     'duration': duration,
-                    'error': stderr
+                    'error': error_msg,
+                    'log_file': log_file,
+                    'log_content': log_content
                 }
 
         duration = time.time() - start_time
@@ -511,17 +540,30 @@ class CheckpointManager:
         stdout, stderr, status = client.execute(criu_cmd, timeout=300)
         duration = time.time() - start_time
 
+        # Fix permissions for log collection (CRIU creates files as root)
+        # Do this even on failure so we can collect logs
+        client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
+
         if status != 0:
-            logger.error(f"Restore failed: {stderr}")
+            # Try to get more details from CRIU log
+            log_content = ""
+            log_stdout, _, log_status = client.execute(f"tail -30 {restore_log_file} 2>/dev/null")
+            if log_status == 0:
+                log_content = log_stdout
+
+            error_msg = stderr if stderr else "Unknown error (check CRIU log)"
+            logger.error(f"Restore failed: {error_msg}")
+            if log_content:
+                logger.error(f"CRIU log tail:\n{log_content}")
+
             return {
                 'success': False,
                 'duration': duration,
-                'error': stderr,
-                'stdout': stdout
+                'error': error_msg,
+                'stdout': stdout,
+                'log_file': restore_log_file,
+                'log_content': log_content
             }
-
-        # Fix permissions for log collection (CRIU creates files as root)
-        client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
 
         logger.info(f"Restore completed in {duration:.2f}s")
 
