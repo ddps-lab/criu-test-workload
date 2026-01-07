@@ -269,9 +269,11 @@ class CheckpointManager:
 
         # Start strace in background to capture stdout from the beginning
         # This will run until we explicitly stop it before dump
+        # Use nohup and redirect stderr to avoid blocking the SSH session
         strace_file = f"{self.working_dir}/workload_stdout_pre_dump.log.raw"
-        strace_cmd = f"sudo strace -p {pid} -e trace=write -e write=1,2 -s 4096 -o {strace_file} &"
+        strace_cmd = f"nohup sudo strace -p {pid} -e trace=write -e write=1,2 -s 4096 -o {strace_file} > /dev/null 2>&1 &"
         client.execute(strace_cmd)
+        time.sleep(0.5)  # Give strace time to attach
         logger.info(f"Started background strace for PID {pid}")
 
         return pid
