@@ -935,20 +935,13 @@ class CheckpointManager:
             echo "Stopping background strace..." >> {strace_file}.info
 
             # Find and kill ALL strace processes (may have multiple)
-            STRACE_PIDS=$(pgrep -f 'strace' 2>/dev/null | tr '\\n' ' ' || true)
+            STRACE_PIDS=$(pgrep -f 'strace' 2>/dev/null | tr '\\n' ' ') || true
             if [ -n "$STRACE_PIDS" ]; then
                 echo "Found strace PIDs: $STRACE_PIDS" >> {strace_file}.info
-                # Kill all strace processes at once
-                echo $STRACE_PIDS | xargs -r sudo kill -9 2>/dev/null || true
+                # Kill all strace processes using pkill (simpler than xargs)
+                sudo pkill -9 -f 'strace' >> {strace_file}.info 2>&1 || true
                 # Wait for strace to fully terminate
                 sleep 1
-                # Verify strace is gone
-                REMAINING=$(pgrep -f 'strace' 2>/dev/null | tr '\\n' ' ' || true)
-                if [ -n "$REMAINING" ]; then
-                    echo "WARNING: strace still running: $REMAINING" >> {strace_file}.info
-                    echo $REMAINING | xargs -r sudo kill -9 2>/dev/null || true
-                    sleep 0.5
-                fi
                 echo "Strace stopped" >> {strace_file}.info
             else
                 echo "No background strace found" >> {strace_file}.info
@@ -965,13 +958,12 @@ class CheckpointManager:
                 # Extract the string content from write(1, "...", N) or write(2, "...", N)
                 # Note: strace output format is: write(1, "content", len)
                 # Skip hex dump lines (start with " |") and newline-only writes
+                # Use printf to properly handle escape sequences
                 grep '^write([12], "' {strace_file}.raw 2>/dev/null | \\
                     sed 's/^write([12], "//; s/".*$//' | \\
                     grep -v '^\\\\n$' | \\
                     tr -d '\\n' | \\
-                    sed 's/\\\\n/\\n/g' | \\
-                    sed 's/\\\\t/\\t/g' | \\
-                    sed 's/\\\\r//g' > {strace_file} 2>> {strace_file}.info
+                    while IFS= read -r line; do printf "%b" "$line"; done > {strace_file} 2>> {strace_file}.info
 
                 # Ensure the file exists even if empty
                 touch {strace_file}
@@ -1015,13 +1007,12 @@ class CheckpointManager:
                     # Parse strace output
                     if [ -f {strace_file}.raw ]; then
                         # Skip hex dump lines and newline-only writes, join and split properly
+                        # Use printf %b to properly handle escape sequences like \\n -> newline
                         grep '^write([12], "' {strace_file}.raw 2>/dev/null | \\
                             sed 's/^write([12], "//; s/".*$//' | \\
                             grep -v '^\\\\n$' | \\
                             tr -d '\\n' | \\
-                            sed 's/\\\\n/\\n/g' | \\
-                            sed 's/\\\\t/\\t/g' | \\
-                            sed 's/\\\\r//g' > {strace_file} 2>> {strace_file}.info
+                            while IFS= read -r line; do printf "%b" "$line"; done > {strace_file} 2>> {strace_file}.info
                         touch {strace_file}
                         echo "Parsed strace output to clean log" >> {strace_file}.info
                     fi
