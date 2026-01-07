@@ -916,40 +916,46 @@ class CheckpointManager:
         # Find workload PID and run strace
         # Note: strace captures write syscalls even if stdout is /dev/null
         # Use longer duration (6s) since some workloads print every 5 seconds
+        # All workloads are python3 wrappers (video/redis also use python wrapper that spawns ffmpeg/redis-server)
         strace_cmd = f"""
-        # Find workload process - try multiple patterns
-        PID=""
-        for pattern in "standalone.py" "python3.*workload" "ffmpeg" "redis-server"; do
-            PID=$(pgrep -f "$pattern" 2>/dev/null | head -1)
-            if [ -n "$PID" ]; then
-                break
-            fi
-        done
-
         echo "=== Strace Debug Info ===" > {strace_file}.info
         echo "Timestamp: $(date -Iseconds)" >> {strace_file}.info
-        echo "Looking for workload process..." >> {strace_file}.info
+        echo "Looking for python3 workload process..." >> {strace_file}.info
+
+        # Find python3 process running standalone script (exclude bash and grep)
+        # All workloads use python3 wrapper, even video (ffmpeg) and redis
+        PID=$(ps aux | grep 'python3.*standalone' | grep -v grep | grep -v 'bash -c' | awk '{{print $2}}' | head -1)
+
+        echo "Search result PID: $PID" >> {strace_file}.info
 
         if [ -n "$PID" ]; then
             echo "Found PID: $PID" >> {strace_file}.info
             echo "Process info:" >> {strace_file}.info
-            ps -p $PID -o pid,ppid,cmd 2>&1 >> {strace_file}.info
+            ps -p $PID -o pid,ppid,comm,args 2>&1 >> {strace_file}.info
 
-            echo "Attaching strace for {strace_duration}s..." >> {strace_file}.info
+            # Verify it's python3
+            PROC_NAME=$(ps -p $PID -o comm= 2>/dev/null)
+            echo "Process name: $PROC_NAME" >> {strace_file}.info
 
-            # Run strace with timeout, redirect strace's own stderr to .info
-            sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 1000 -o {strace_file} 2>> {strace_file}.info
-            STRACE_EXIT=$?
+            if echo "$PROC_NAME" | grep -q 'python'; then
+                echo "Attaching strace for {strace_duration}s..." >> {strace_file}.info
 
-            echo "Strace exit code: $STRACE_EXIT" >> {strace_file}.info
-            echo "Strace output file:" >> {strace_file}.info
-            ls -la {strace_file} 2>&1 >> {strace_file}.info
-            echo "First 5 lines of strace output:" >> {strace_file}.info
-            head -5 {strace_file} 2>&1 >> {strace_file}.info
+                # Run strace with timeout, redirect strace's own stderr to .info
+                sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 1000 -o {strace_file} 2>> {strace_file}.info
+                STRACE_EXIT=$?
+
+                echo "Strace exit code: $STRACE_EXIT" >> {strace_file}.info
+                echo "Strace output file:" >> {strace_file}.info
+                ls -la {strace_file} 2>&1 >> {strace_file}.info
+                echo "First 5 lines of strace output:" >> {strace_file}.info
+                head -5 {strace_file} 2>&1 >> {strace_file}.info
+            else
+                echo "PID $PID is not python (comm=$PROC_NAME), skipping strace" >> {strace_file}.info
+            fi
         else
-            echo "No workload PID found" >> {strace_file}.info
+            echo "No python3 workload PID found" >> {strace_file}.info
             echo "Running processes:" >> {strace_file}.info
-            ps aux | grep -E 'python|ffmpeg|redis' | grep -v grep >> {strace_file}.info 2>&1
+            ps aux | grep -E 'python|standalone' | head -10 >> {strace_file}.info 2>&1
         fi
         """
         client.execute(strace_cmd)
