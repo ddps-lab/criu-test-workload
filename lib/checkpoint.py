@@ -244,8 +244,9 @@ class CheckpointManager:
 
         # Start workload in background
         # Output goes to /dev/null to avoid file descriptor dependencies in CRIU
-        # Workload logs are captured separately via capture_workload_output() before dump
-        full_command = f"cd {self.working_dir} && {command} > /dev/null 2>&1 &"
+        # Workload logs are captured separately via strace before dump
+        # Add PYTHONUNBUFFERED=1 to disable output buffering so strace can capture prints immediately
+        full_command = f"cd {self.working_dir} && PYTHONUNBUFFERED=1 {command} > /dev/null 2>&1 &"
         client.execute_background(full_command)
 
         # Give process time to start
@@ -835,11 +836,11 @@ class CheckpointManager:
         # Source log patterns: pre-dump, dump, page-server, workload status and stdout
         source_patterns = ['criu-pre-dump.log', 'criu-dump.log', 'criu-page-server.log',
                           'workload_status_pre_dump.txt', 'workload_stdout_pre_dump.log',
-                          'workload_stdout_pre_dump.log.info']
+                          'workload_stdout_pre_dump.log.info', 'workload_stdout_pre_dump.log.raw']
         # Dest log patterns: restore, lazy-pages, workload status and stdout
         dest_patterns = ['criu-restore.log', 'criu-lazy-pages.log',
                         'workload_status_post_restore.txt', 'workload_stdout_post_restore.log',
-                        'workload_stdout_post_restore.log.info']
+                        'workload_stdout_post_restore.log.info', 'workload_stdout_post_restore.log.raw']
 
         # Collect from source node
         source_client = self.get_ssh_client(source_host, username)
@@ -848,7 +849,7 @@ class CheckpointManager:
 
         # Find checkpoint directories and collect source-specific logs
         stdout, stderr, status = source_client.execute(
-            f"find {self.working_dir} \\( -name '*.log' -o -name '*.log.info' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
+            f"find {self.working_dir} \\( -name '*.log' -o -name '*.log.info' -o -name '*.log.raw' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
         )
 
         if status == 0 and stdout.strip():
@@ -870,7 +871,7 @@ class CheckpointManager:
         dest_dir.mkdir(exist_ok=True)
 
         stdout, stderr, status = dest_client.execute(
-            f"find {self.working_dir} \\( -name '*.log' -o -name '*.log.info' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
+            f"find {self.working_dir} \\( -name '*.log' -o -name '*.log.info' -o -name '*.log.raw' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
         )
 
         if status == 0 and stdout.strip():
@@ -941,14 +942,22 @@ class CheckpointManager:
                 echo "Attaching strace for {strace_duration}s..." >> {strace_file}.info
 
                 # Run strace with timeout, redirect strace's own stderr to .info
-                sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 1000 -o {strace_file} 2>> {strace_file}.info
+                sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 4096 -o {strace_file}.raw 2>> {strace_file}.info
                 STRACE_EXIT=$?
 
                 echo "Strace exit code: $STRACE_EXIT" >> {strace_file}.info
-                echo "Strace output file:" >> {strace_file}.info
-                ls -la {strace_file} 2>&1 >> {strace_file}.info
-                echo "First 5 lines of strace output:" >> {strace_file}.info
-                head -5 {strace_file} 2>&1 >> {strace_file}.info
+
+                # Parse strace output to extract clean log lines
+                # Extract content between quotes from write() calls and unescape \\n
+                if [ -f {strace_file}.raw ]; then
+                    # Extract the string content from write(1, "...", N) or write(2, "...", N)
+                    # Then convert escaped \\n to actual newlines
+                    grep -oP 'write\\([12], "\\K[^"]*' {strace_file}.raw | \\
+                        sed 's/\\\\n/\\n/g' | \\
+                        sed 's/\\\\t/\\t/g' | \\
+                        sed 's/\\\\r//g' > {strace_file}
+                    echo "Parsed strace output to clean log" >> {strace_file}.info
+                fi
             else
                 echo "PID $PID is not python (comm=$PROC_NAME), skipping strace" >> {strace_file}.info
             fi
