@@ -832,12 +832,12 @@ class CheckpointManager:
             'timestamp': timestamp
         }
 
-        # Source log patterns: pre-dump, dump, page-server, and workload logs
+        # Source log patterns: pre-dump, dump, page-server, and workload status
         source_patterns = ['criu-pre-dump.log', 'criu-dump.log', 'criu-page-server.log',
-                          'workload.log', 'workload_pre_dump.log']
-        # Dest log patterns: restore, lazy-pages, and workload logs
+                          'workload.log', 'workload_status_pre_dump.txt']
+        # Dest log patterns: restore, lazy-pages, and workload status
         dest_patterns = ['criu-restore.log', 'criu-lazy-pages.log',
-                        'workload.log', 'workload_post_restore.log']
+                        'workload.log', 'workload_status_post_restore.txt']
 
         # Collect from source node
         source_client = self.get_ssh_client(source_host, username)
@@ -846,7 +846,7 @@ class CheckpointManager:
 
         # Find checkpoint directories and collect source-specific logs
         stdout, stderr, status = source_client.execute(
-            f"find {self.working_dir} -name '*.log' -type f 2>/dev/null"
+            f"find {self.working_dir} \\( -name '*.log' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
         )
 
         if status == 0 and stdout.strip():
@@ -868,7 +868,7 @@ class CheckpointManager:
         dest_dir.mkdir(exist_ok=True)
 
         stdout, stderr, status = dest_client.execute(
-            f"find {self.working_dir} -name '*.log' -type f 2>/dev/null"
+            f"find {self.working_dir} \\( -name '*.log' -o -name 'workload_status_*.txt' \\) -type f 2>/dev/null"
         )
 
         if status == 0 and stdout.strip():
