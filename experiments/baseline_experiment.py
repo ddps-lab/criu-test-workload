@@ -355,7 +355,7 @@ def main():
                 print(f"  Dest: {len(log_result['dest'])} files")
 
                 # Also save metrics alongside logs
-                metrics_file = f"{log_result['output_dir']}/experiment_metrics.json"
+                metrics_file = f"{log_result['output_dir']}/metrics.json"
                 experiment.metrics.save_to_file(metrics_file)
                 print(f"  Metrics: {metrics_file}")
 

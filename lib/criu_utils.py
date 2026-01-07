@@ -125,7 +125,7 @@ class CRIUExperiment:
 
             # Save metrics to file if configured
             if self.experiment_config.get('save_metrics'):
-                output_file = self.experiment_config.get('metrics_file', 'experiment_metrics.json')
+                output_file = self.experiment_config.get('metrics_file', 'metrics.json')
                 self.metrics.save_to_file(output_file)
                 logger.info(f"Metrics saved to {output_file}")
 

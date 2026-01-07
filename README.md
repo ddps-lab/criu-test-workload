@@ -102,7 +102,7 @@ python3 run_experiment.py -c config/experiments/lazy_pages.yaml
 ### 3. 결과 확인
 
 ```bash
-cat experiment_metrics.json | python3 -m json.tool
+cat metrics.json | python3 -m json.tool
 ```
 
 ---
