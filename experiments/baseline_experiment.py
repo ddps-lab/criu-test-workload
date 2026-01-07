@@ -551,6 +551,24 @@ def main():
 
         else:
             logger.error(f"Experiment failed: {result.get('error')}")
+
+            # Collect logs even on failure
+            if args.collect_logs:
+                logger.info("Collecting CRIU logs from nodes (experiment failed)...")
+                try:
+                    log_result = experiment.checkpoint_mgr.collect_logs(
+                        experiment.source_host,
+                        experiment.dest_host,
+                        args.logs_dir,
+                        experiment.nodes_config.get('ssh_user', 'ubuntu'),
+                        experiment_name=f"{args.name}_failed" if args.name else "failed"
+                    )
+                    print(f"Logs collected: {log_result['output_dir']}")
+                    print(f"  Source: {len(log_result['source'])} files")
+                    print(f"  Dest: {len(log_result['dest'])} files")
+                except Exception as log_err:
+                    logger.warning(f"Failed to collect logs: {log_err}")
+
             return 1
 
     except FileNotFoundError as e:
@@ -561,6 +579,22 @@ def main():
         return 1
     except Exception as e:
         logger.error(f"Experiment failed with exception: {e}", exc_info=True)
+
+        # Collect logs on exception if possible
+        if args.collect_logs:
+            try:
+                logger.info("Collecting CRIU logs from nodes (exception occurred)...")
+                log_result = experiment.checkpoint_mgr.collect_logs(
+                    experiment.source_host,
+                    experiment.dest_host,
+                    args.logs_dir,
+                    experiment.nodes_config.get('ssh_user', 'ubuntu'),
+                    experiment_name=f"{args.name}_exception" if args.name else "exception"
+                )
+                print(f"Logs collected: {log_result['output_dir']}")
+            except Exception as log_err:
+                logger.warning(f"Failed to collect logs: {log_err}")
+
         return 1
 
 
