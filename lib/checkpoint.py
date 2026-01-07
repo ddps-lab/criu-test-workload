@@ -242,11 +242,10 @@ class CheckpointManager:
         # Create checkpoint flag file
         client.execute(f"touch {self.working_dir}/checkpoint_flag")
 
-        # Log file for workload output
-        workload_log = f"{self.working_dir}/workload.log"
-
-        # Start workload in background with output redirected to log file
-        full_command = f"cd {self.working_dir} && {command} >> {workload_log} 2>&1 &"
+        # Start workload in background
+        # Output goes to /dev/null to avoid file descriptor dependencies in CRIU
+        # Workload logs are captured separately via capture_workload_output() before dump
+        full_command = f"cd {self.working_dir} && {command} > /dev/null 2>&1 &"
         client.execute_background(full_command)
 
         # Give process time to start
@@ -892,7 +891,11 @@ class CheckpointManager:
 
     def capture_workload_log(self, host: str, label: str, username: str = 'ubuntu') -> str:
         """
-        Capture current workload log with a label (e.g., 'pre_dump', 'post_restore').
+        Capture workload status with a label (e.g., 'pre_dump', 'post_restore').
+
+        For post_restore: Also reads workload.log if it exists (CRIU-safe logging).
+        Since stdout is redirected to /dev/null to avoid CRIU file descriptor issues,
+        we capture process status instead (memory usage, running time, etc.)
 
         Args:
             host: Remote host IP
@@ -900,25 +903,54 @@ class CheckpointManager:
             username: SSH username
 
         Returns:
-            Log content as string
+            Status info as string
         """
         client = self.get_ssh_client(host, username)
-        workload_log = f"{self.working_dir}/workload.log"
+        status_file = f"{self.working_dir}/workload_status_{label}.txt"
 
-        # Read current log content
-        stdout, stderr, status = client.execute(f"cat {workload_log} 2>/dev/null")
+        # Collect process status information
+        status_cmd = f"""
+        echo "=== Workload Status ({label}) ===" > {status_file}
+        echo "Timestamp: $(date -Iseconds)" >> {status_file}
+        echo "" >> {status_file}
+
+        # Find workload processes
+        echo "=== Process List ===" >> {status_file}
+        ps aux | grep -E 'python3|ffmpeg|redis-server' | grep -v grep >> {status_file} 2>/dev/null || echo "No processes found" >> {status_file}
+        echo "" >> {status_file}
+
+        # Memory info for each process
+        echo "=== Process Memory (from /proc) ===" >> {status_file}
+        for pid in $(pgrep -f 'standalone.py|ffmpeg|redis-server' 2>/dev/null); do
+            if [ -f /proc/$pid/status ]; then
+                echo "PID $pid:" >> {status_file}
+                grep -E '^(Name|VmRSS|VmSize|VmPeak|Threads)' /proc/$pid/status >> {status_file} 2>/dev/null
+                echo "" >> {status_file}
+            fi
+        done
+
+        # Check checkpoint_ready file
+        echo "=== Checkpoint Ready File ===" >> {status_file}
+        cat {self.working_dir}/checkpoint_ready 2>/dev/null || echo "Not found" >> {status_file}
+        echo "" >> {status_file}
+
+        # For post_restore: read workload.log if exists (CRIU-safe file logging)
+        if [ "{label}" = "post_restore" ] && [ -f {self.working_dir}/workload.log ]; then
+            echo "=== Workload Log (last 30 lines) ===" >> {status_file}
+            tail -30 {self.working_dir}/workload.log >> {status_file} 2>/dev/null
+            echo "" >> {status_file}
+        fi
+
+        cat {status_file}
+        """
+
+        stdout, stderr, status = client.execute(status_cmd)
 
         if status == 0:
-            log_content = stdout
-
-            # Save snapshot with label
-            snapshot_file = f"{self.working_dir}/workload_{label}.log"
-            client.execute(f"cp {workload_log} {snapshot_file}")
-
-            logger.info(f"Captured workload log ({label}): {len(log_content)} bytes")
-            return log_content
+            logger.info(f"Captured workload status ({label})")
+            return stdout
         else:
-            logger.warning(f"Could not read workload log on {host}")
+            logger.warning(f"Could not capture workload status on {host}")
             return ""
 
     def verify_restored_process(self, host: str, workload_type: str,
