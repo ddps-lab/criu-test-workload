@@ -928,17 +928,28 @@ class CheckpointManager:
         if label == 'pre_dump':
             # For pre_dump: stop the background strace that was started with workload
             # and parse the accumulated output
+            # IMPORTANT: strace must be fully stopped before CRIU dump, otherwise ptrace conflict
             strace_cmd = f"""
             echo "=== Strace Debug Info ===" > {strace_file}.info
             echo "Timestamp: $(date -Iseconds)" >> {strace_file}.info
             echo "Stopping background strace..." >> {strace_file}.info
 
-            # Find and kill the background strace process
-            STRACE_PID=$(pgrep -f 'strace.*standalone' 2>/dev/null | head -1)
-            if [ -n "$STRACE_PID" ]; then
-                echo "Found strace PID: $STRACE_PID" >> {strace_file}.info
-                sudo kill $STRACE_PID 2>/dev/null || true
-                sleep 0.5
+            # Find and kill ALL strace processes (may have multiple)
+            STRACE_PIDS=$(pgrep -f 'strace' 2>/dev/null)
+            if [ -n "$STRACE_PIDS" ]; then
+                echo "Found strace PIDs: $STRACE_PIDS" >> {strace_file}.info
+                for pid in $STRACE_PIDS; do
+                    sudo kill -9 $pid 2>/dev/null || true
+                done
+                # Wait for strace to fully terminate
+                sleep 1
+                # Verify strace is gone
+                REMAINING=$(pgrep -f 'strace' 2>/dev/null || true)
+                if [ -n "$REMAINING" ]; then
+                    echo "WARNING: strace still running: $REMAINING" >> {strace_file}.info
+                    sudo kill -9 $REMAINING 2>/dev/null || true
+                    sleep 0.5
+                fi
                 echo "Strace stopped" >> {strace_file}.info
             else
                 echo "No background strace found" >> {strace_file}.info
