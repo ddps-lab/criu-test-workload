@@ -960,11 +960,10 @@ class CheckpointManager:
                 # Extract the string content from write(1, "...", N) or write(2, "...", N)
                 # Note: strace output format is: write(1, "content", len)
                 # Skip hex dump lines (start with " |") and newline-only writes
-                # Use printf to properly handle escape sequences
+                # Use printf to properly handle escape sequences like \\n -> newline
                 grep '^write([12], "' {strace_file}.raw 2>/dev/null | \\
                     sed 's/^write([12], "//; s/".*$//' | \\
                     grep -v '^\\\\n$' | \\
-                    tr -d '\\n' | \\
                     while IFS= read -r line; do printf "%b" "$line"; done > {strace_file} 2>> {strace_file}.info
 
                 # Ensure the file exists even if empty
@@ -1008,12 +1007,11 @@ class CheckpointManager:
 
                     # Parse strace output
                     if [ -f {strace_file}.raw ]; then
-                        # Skip hex dump lines and newline-only writes, join and split properly
+                        # Skip hex dump lines and newline-only writes
                         # Use printf %b to properly handle escape sequences like \\n -> newline
                         grep '^write([12], "' {strace_file}.raw 2>/dev/null | \\
                             sed 's/^write([12], "//; s/".*$//' | \\
                             grep -v '^\\\\n$' | \\
-                            tr -d '\\n' | \\
                             while IFS= read -r line; do printf "%b" "$line"; done > {strace_file} 2>> {strace_file}.info
                         touch {strace_file}
                         echo "Parsed strace output to clean log" >> {strace_file}.info
