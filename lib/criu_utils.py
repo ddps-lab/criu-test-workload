@@ -319,6 +319,11 @@ class CRIUExperiment:
         # Get workload type for CRIU flags
         workload_type = self.experiment_config.get('workload_type', 'memory')
 
+        # Capture workload log before dump
+        self.checkpoint_mgr.capture_workload_log(
+            self.source_host, 'pre_dump', self.ssh_user
+        )
+
         logger.info(f"Performing final dump (lazy_pages={lazy_pages})")
 
         self.metrics.start_timer('final_dump')
@@ -441,9 +446,21 @@ class CRIUExperiment:
         if not result['success']:
             raise RuntimeError(f"Restore failed: {result.get('error')}")
 
+        # Verify restored process and capture post-restore log
+        verify_result = self.checkpoint_mgr.verify_restored_process(
+            self.dest_host, workload_type, wait_time=3.0, username=self.ssh_user
+        )
+
         self.metrics.record_restore(
             restore_metric.duration,
-            {'lazy_pages': lazy_pages}
+            {
+                'lazy_pages': lazy_pages,
+                'process_running': verify_result['is_running'],
+                'restored_pids': verify_result['pids']
+            }
         )
+
+        if not verify_result['is_running']:
+            logger.warning("Restored process exited early - check post_restore log for details")
 
         logger.info(f"Restore completed in {restore_metric.duration:.2f}s")

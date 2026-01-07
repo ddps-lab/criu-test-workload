@@ -242,8 +242,11 @@ class CheckpointManager:
         # Create checkpoint flag file
         client.execute(f"touch {self.working_dir}/checkpoint_flag")
 
-        # Start workload in background
-        full_command = f"cd {self.working_dir} && {command} &"
+        # Log file for workload output
+        workload_log = f"{self.working_dir}/workload.log"
+
+        # Start workload in background with output redirected to log file
+        full_command = f"cd {self.working_dir} && {command} >> {workload_log} 2>&1 &"
         client.execute_background(full_command)
 
         # Give process time to start
@@ -830,10 +833,12 @@ class CheckpointManager:
             'timestamp': timestamp
         }
 
-        # Source log patterns: pre-dump, dump, and page-server (for live migration)
-        source_patterns = ['criu-pre-dump.log', 'criu-dump.log', 'criu-page-server.log']
-        # Dest log patterns: restore and lazy-pages only (dump logs are rsync copies)
-        dest_patterns = ['criu-restore.log', 'criu-lazy-pages.log']
+        # Source log patterns: pre-dump, dump, page-server, and workload logs
+        source_patterns = ['criu-pre-dump.log', 'criu-dump.log', 'criu-page-server.log',
+                          'workload.log', 'workload_pre_dump.log']
+        # Dest log patterns: restore, lazy-pages, and workload logs
+        dest_patterns = ['criu-restore.log', 'criu-lazy-pages.log',
+                        'workload.log', 'workload_post_restore.log']
 
         # Collect from source node
         source_client = self.get_ssh_client(source_host, username)
@@ -884,6 +889,89 @@ class CheckpointManager:
         logger.info(f"Collected {total} log files to {output_dir}")
 
         return collected
+
+    def capture_workload_log(self, host: str, label: str, username: str = 'ubuntu') -> str:
+        """
+        Capture current workload log with a label (e.g., 'pre_dump', 'post_restore').
+
+        Args:
+            host: Remote host IP
+            label: Label for this snapshot (e.g., 'pre_dump', 'post_restore')
+            username: SSH username
+
+        Returns:
+            Log content as string
+        """
+        client = self.get_ssh_client(host, username)
+        workload_log = f"{self.working_dir}/workload.log"
+
+        # Read current log content
+        stdout, stderr, status = client.execute(f"cat {workload_log} 2>/dev/null")
+
+        if status == 0:
+            log_content = stdout
+
+            # Save snapshot with label
+            snapshot_file = f"{self.working_dir}/workload_{label}.log"
+            client.execute(f"cp {workload_log} {snapshot_file}")
+
+            logger.info(f"Captured workload log ({label}): {len(log_content)} bytes")
+            return log_content
+        else:
+            logger.warning(f"Could not read workload log on {host}")
+            return ""
+
+    def verify_restored_process(self, host: str, workload_type: str,
+                                 wait_time: float = 3.0, username: str = 'ubuntu') -> Dict[str, Any]:
+        """
+        Verify restored process is running and capture post-restore log.
+
+        Args:
+            host: Remote host IP
+            workload_type: Type of workload
+            wait_time: Time to wait before checking (allows process to run briefly)
+            username: SSH username
+
+        Returns:
+            Dictionary with verification results
+        """
+        client = self.get_ssh_client(host, username)
+
+        # Wait a bit to let the restored process run
+        logger.info(f"Waiting {wait_time}s for restored process to run...")
+        time.sleep(wait_time)
+
+        # Capture post-restore workload log
+        post_log = self.capture_workload_log(host, 'post_restore', username)
+
+        # Check if process is still running
+        process_patterns = {
+            'memory': 'memory_standalone.py',
+            'matmul': 'matmul_standalone.py',
+            'redis': 'redis-server',
+            'video': 'ffmpeg',
+            'dataproc': 'dataproc_standalone.py',
+            'ml_training': 'ml_training_standalone.py',
+        }
+
+        pattern = process_patterns.get(workload_type, workload_type)
+        ps_cmd = f"pgrep -f '{pattern}'"
+        stdout, stderr, status = client.execute(ps_cmd)
+
+        is_running = status == 0 and stdout.strip()
+
+        result = {
+            'is_running': is_running,
+            'post_restore_log': post_log,
+            'pids': stdout.strip().split('\n') if is_running else []
+        }
+
+        if is_running:
+            logger.info(f"Restored process is running (PIDs: {result['pids']})")
+        else:
+            logger.warning(f"Restored process is NOT running")
+
+        return result
 
     def close_all_connections(self):
         """Close all SSH connections."""
