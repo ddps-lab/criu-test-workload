@@ -229,6 +229,8 @@ class CheckpointManager:
         """
         Start workload process on remote host and return PID.
 
+        Also starts strace in background to capture stdout from the beginning.
+
         Args:
             host: Remote host IP
             command: Command to start workload
@@ -264,6 +266,14 @@ class CheckpointManager:
             raise RuntimeError(f"No PID found for command: {command}")
 
         logger.info(f"Started workload with PID {pid} on {host}")
+
+        # Start strace in background to capture stdout from the beginning
+        # This will run until we explicitly stop it before dump
+        strace_file = f"{self.working_dir}/workload_stdout_pre_dump.log.raw"
+        strace_cmd = f"sudo strace -p {pid} -e trace=write -e write=1,2 -s 4096 -o {strace_file} &"
+        client.execute(strace_cmd)
+        logger.info(f"Started background strace for PID {pid}")
+
         return pid
 
     def wait_for_ready(self, host: str, ready_file: str = 'checkpoint_ready', timeout: int = 300, username: str = 'ubuntu'):
@@ -897,14 +907,14 @@ class CheckpointManager:
         """
         Capture workload status and stdout via strace.
 
-        Uses strace to capture process stdout/stderr writes for a short duration,
-        then detaches before checkpoint to avoid CRIU issues.
+        For pre_dump: stops the background strace that was started with workload and parses output.
+        For post_restore: starts new strace for specified duration.
 
         Args:
             host: Remote host IP
             label: Label for this snapshot (e.g., 'pre_dump', 'post_restore')
             username: SSH username
-            strace_duration: How long to capture stdout via strace (seconds)
+            strace_duration: How long to capture stdout via strace (seconds, for post_restore only)
 
         Returns:
             Status info as string
@@ -913,60 +923,86 @@ class CheckpointManager:
         status_file = f"{self.working_dir}/workload_status_{label}.txt"
         strace_file = f"{self.working_dir}/workload_stdout_{label}.log"
 
-        # First, capture stdout via strace for a short duration
-        # Find workload PID and run strace
-        # Note: strace captures write syscalls even if stdout is /dev/null
-        # Use longer duration (6s) since some workloads print every 5 seconds
-        # All workloads are python3 wrappers (video/redis also use python wrapper that spawns ffmpeg/redis-server)
-        strace_cmd = f"""
-        echo "=== Strace Debug Info ===" > {strace_file}.info
-        echo "Timestamp: $(date -Iseconds)" >> {strace_file}.info
-        echo "Looking for python3 workload process..." >> {strace_file}.info
+        if label == 'pre_dump':
+            # For pre_dump: stop the background strace that was started with workload
+            # and parse the accumulated output
+            strace_cmd = f"""
+            echo "=== Strace Debug Info ===" > {strace_file}.info
+            echo "Timestamp: $(date -Iseconds)" >> {strace_file}.info
+            echo "Stopping background strace..." >> {strace_file}.info
 
-        # Find python3 process running standalone script (exclude bash and grep)
-        # All workloads use python3 wrapper, even video (ffmpeg) and redis
-        PID=$(ps aux | grep 'python3.*standalone' | grep -v grep | grep -v 'bash -c' | awk '{{print $2}}' | head -1)
+            # Find and kill the background strace process
+            STRACE_PID=$(pgrep -f 'strace.*standalone' 2>/dev/null | head -1)
+            if [ -n "$STRACE_PID" ]; then
+                echo "Found strace PID: $STRACE_PID" >> {strace_file}.info
+                sudo kill $STRACE_PID 2>/dev/null || true
+                sleep 0.5
+                echo "Strace stopped" >> {strace_file}.info
+            else
+                echo "No background strace found" >> {strace_file}.info
+            fi
 
-        echo "Search result PID: $PID" >> {strace_file}.info
+            # Parse strace output to extract clean log lines
+            if [ -f {strace_file}.raw ]; then
+                echo "Parsing strace output from {strace_file}.raw" >> {strace_file}.info
+                ls -la {strace_file}.raw >> {strace_file}.info 2>&1
 
-        if [ -n "$PID" ]; then
-            echo "Found PID: $PID" >> {strace_file}.info
-            echo "Process info:" >> {strace_file}.info
-            ps -p $PID -o pid,ppid,comm,args 2>&1 >> {strace_file}.info
+                # Extract the string content from write(1, "...", N) or write(2, "...", N)
+                # Then convert escaped \\n to actual newlines
+                grep -oP 'write\\([12], "\\K[^"]*' {strace_file}.raw 2>/dev/null | \\
+                    sed 's/\\\\n/\\n/g' | \\
+                    sed 's/\\\\t/\\t/g' | \\
+                    sed 's/\\\\r//g' > {strace_file}
+                echo "Parsed strace output to clean log" >> {strace_file}.info
+                wc -l {strace_file} >> {strace_file}.info 2>&1
+            else
+                echo "No strace raw file found at {strace_file}.raw" >> {strace_file}.info
+            fi
+            """
+        else:
+            # For post_restore: start new strace for specified duration
+            strace_cmd = f"""
+            echo "=== Strace Debug Info ===" > {strace_file}.info
+            echo "Timestamp: $(date -Iseconds)" >> {strace_file}.info
+            echo "Looking for python3 workload process..." >> {strace_file}.info
 
-            # Verify it's python3
-            PROC_NAME=$(ps -p $PID -o comm= 2>/dev/null)
-            echo "Process name: $PROC_NAME" >> {strace_file}.info
+            # Find python3 process running standalone script
+            PID=$(ps aux | grep 'python3.*standalone' | grep -v grep | grep -v 'bash -c' | awk '{{print $2}}' | head -1)
 
-            if echo "$PROC_NAME" | grep -q 'python'; then
-                echo "Attaching strace for {strace_duration}s..." >> {strace_file}.info
+            echo "Search result PID: $PID" >> {strace_file}.info
 
-                # Run strace with timeout, redirect strace's own stderr to .info
-                sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 4096 -o {strace_file}.raw 2>> {strace_file}.info
-                STRACE_EXIT=$?
+            if [ -n "$PID" ]; then
+                echo "Found PID: $PID" >> {strace_file}.info
+                echo "Process info:" >> {strace_file}.info
+                ps -p $PID -o pid,ppid,comm,args 2>&1 >> {strace_file}.info
 
-                echo "Strace exit code: $STRACE_EXIT" >> {strace_file}.info
+                PROC_NAME=$(ps -p $PID -o comm= 2>/dev/null)
+                echo "Process name: $PROC_NAME" >> {strace_file}.info
 
-                # Parse strace output to extract clean log lines
-                # Extract content between quotes from write() calls and unescape \\n
-                if [ -f {strace_file}.raw ]; then
-                    # Extract the string content from write(1, "...", N) or write(2, "...", N)
-                    # Then convert escaped \\n to actual newlines
-                    grep -oP 'write\\([12], "\\K[^"]*' {strace_file}.raw | \\
-                        sed 's/\\\\n/\\n/g' | \\
-                        sed 's/\\\\t/\\t/g' | \\
-                        sed 's/\\\\r//g' > {strace_file}
-                    echo "Parsed strace output to clean log" >> {strace_file}.info
+                if echo "$PROC_NAME" | grep -q 'python'; then
+                    echo "Attaching strace for {strace_duration}s..." >> {strace_file}.info
+
+                    sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 4096 -o {strace_file}.raw 2>> {strace_file}.info
+                    STRACE_EXIT=$?
+                    echo "Strace exit code: $STRACE_EXIT" >> {strace_file}.info
+
+                    # Parse strace output
+                    if [ -f {strace_file}.raw ]; then
+                        grep -oP 'write\\([12], "\\K[^"]*' {strace_file}.raw 2>/dev/null | \\
+                            sed 's/\\\\n/\\n/g' | \\
+                            sed 's/\\\\t/\\t/g' | \\
+                            sed 's/\\\\r//g' > {strace_file}
+                        echo "Parsed strace output to clean log" >> {strace_file}.info
+                    fi
+                else
+                    echo "PID $PID is not python (comm=$PROC_NAME), skipping strace" >> {strace_file}.info
                 fi
             else
-                echo "PID $PID is not python (comm=$PROC_NAME), skipping strace" >> {strace_file}.info
+                echo "No python3 workload PID found" >> {strace_file}.info
+                echo "Running processes:" >> {strace_file}.info
+                ps aux | grep -E 'python|standalone' | head -10 >> {strace_file}.info 2>&1
             fi
-        else
-            echo "No python3 workload PID found" >> {strace_file}.info
-            echo "Running processes:" >> {strace_file}.info
-            ps aux | grep -E 'python|standalone' | head -10 >> {strace_file}.info 2>&1
-        fi
-        """
+            """
         client.execute(strace_cmd)
 
         # Collect process status information
