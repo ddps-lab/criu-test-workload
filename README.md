@@ -9,11 +9,10 @@ CRIU(Checkpoint/Restore In Userspace) 기반 라이브 마이그레이션 실험
 - [워크로드 시나리오](#워크로드-시나리오)
   - [1. 메모리 할당](#1-메모리-할당-워크로드)
   - [2. 행렬 곱셈](#2-행렬-곱셈-워크로드)
-  - [3. Redis 유사 인메모리 DB](#3-redis-유사-인메모리-데이터베이스-워크로드)
+  - [3. Redis 인메모리 DB](#3-redis-인메모리-데이터베이스-워크로드)
   - [4. ML 학습 (PyTorch)](#4-ml-학습-워크로드-pytorch)
-  - [5. Jupyter 노트북 시뮬레이션](#5-jupyter-노트북-시뮬레이션-워크로드)
-  - [6. 비디오 처리](#6-비디오-처리-워크로드)
-  - [7. 데이터 처리 (Pandas 유사)](#7-데이터-처리-워크로드-pandas-유사)
+  - [5. 비디오 처리](#5-비디오-처리-워크로드)
+  - [6. 데이터 처리 (Pandas 유사)](#6-데이터-처리-워크로드-pandas-유사)
 - [설정](#설정)
 - [체크포인트 전략](#체크포인트-전략)
 - [AWS Lab 연동](#aws-lab-연동)
@@ -27,7 +26,7 @@ CRIU(Checkpoint/Restore In Userspace) 기반 라이브 마이그레이션 실험
 criu_workload/
 ├── lib/                          # 코어 라이브러리 (컨트롤 노드 전용)
 │   ├── config.py                 # YAML 설정 + 환경변수 치환
-│   ├── checkpoint.py             # SSH 기반 CRIU 작업
+│   ├── checkpoint.py             # SSH 기반 CRIU 작업 + 로그 수집
 │   ├── transfer.py               # 체크포인트 전송 (rsync/S3/EFS/EBS)
 │   ├── timing.py                 # 메트릭 수집
 │   └── criu_utils.py             # 메인 오케스트레이터
@@ -41,8 +40,67 @@ criu_workload/
 │   └── workloads/                # 워크로드별 설정
 ├── experiments/                  # 실험 스크립트
 │   └── baseline_experiment.py    # 메인 실험 실행기
+├── results/                      # 실험 결과 (자동 생성)
+│   └── <workload>_<timestamp>/
+│       ├── source/               # Source 노드 로그
+│       │   ├── criu-*.log        # CRIU 작업 로그
+│       │   ├── workload_status_pre_dump.txt
+│       │   └── workload_stdout_pre_dump.log*
+│       ├── dest/                 # Destination 노드 로그
+│       │   ├── criu-*.log
+│       │   ├── workload_status_post_restore.txt
+│       │   └── workload_stdout_post_restore.log*
+│       └── metrics.json          # 실험 메트릭
 └── run_experiment.py             # 빠른 실행 스크립트
 ```
+
+### 코어 라이브러리 상세
+
+#### checkpoint.py
+CRIU 작업과 로그 수집을 담당하는 핵심 모듈:
+- **SSH 기반 원격 실행**: Paramiko를 사용하여 source/dest 노드에서 CRIU 명령 실행
+- **워크로드 배포**: SCP를 통해 독립 스크립트를 워크로드 노드에 배포
+- **프로세스 관리**: 워크로드 시작, PID 추적, 체크포인트 준비 시그널 대기
+- **CRIU 작업**:
+  - Pre-dump: 반복적 메모리 스냅샷 (변경된 페이지만)
+  - Dump: 최종 체크포인트 생성
+  - Page server: 네트워크 기반 메모리 페이지 전송
+  - Restore: 체크포인트에서 프로세스 복원
+  - Lazy pages: 온디맨드 페이지 로딩
+- **로그 수집**:
+  - CRIU 작업 로그 (pre-dump, dump, restore, page-server, lazy-pages)
+  - 워크로드 상태 정보 (프로세스 목록, 메모리 사용량)
+  - 워크로드 stdout/stderr 캡처 (strace 사용)
+  - 실험 실패 시에도 로그 수집 보장
+
+#### transfer.py
+체크포인트 데이터 전송을 담당:
+- **rsync**: SSH 기반 빠른 파일 동기화 (기본값)
+- **S3**: AWS S3를 통한 체크포인트 저장/복원
+- **EFS**: AWS EFS 공유 파일시스템 (크로스-AZ 지원)
+- **EBS**: EBS 볼륨 detach/attach 패턴
+- 전송 시간, 크기, 처리량 메트릭 수집
+
+#### config.py
+설정 관리 및 환경변수 치환:
+- YAML 파일 로드 및 파싱
+- 환경변수 치환 (`${VAR_NAME}`)
+- `servers.yaml`과 `default.yaml` 병합
+- 명령줄 인자 우선순위 처리
+
+#### timing.py
+실험 메트릭 수집 및 저장:
+- 각 단계별 시간 측정 (컨텍스트 매니저 사용)
+- 메트릭 계산 (평균, 합계, 처리량)
+- JSON 형식으로 메트릭 저장
+
+#### criu_utils.py
+전체 실험 오케스트레이션:
+- 워크로드 배포 및 시작
+- 체크포인트 전략 실행 (predump/full)
+- 전송 및 복원
+- 로그 수집 및 정리
+- 에러 처리 및 복구
 
 ### 노드 분리 아키텍처
 
@@ -104,6 +162,75 @@ python3 run_experiment.py -c config/experiments/lazy_pages.yaml
 ```bash
 cat metrics.json | python3 -m json.tool
 ```
+
+---
+
+## 로그 수집 및 디버깅
+
+### 자동 로그 수집
+
+모든 실험은 자동으로 상세한 로그를 수집하여 `results/` 디렉토리에 저장합니다:
+
+```bash
+results/
+└── <workload>_<timestamp>/
+    ├── source/                       # Source 노드 로그
+    │   ├── 1/                        # 체크포인트 디렉토리
+    │   ├── criu-pre-dump.log         # Pre-dump CRIU 로그
+    │   ├── criu-dump.log             # Final dump CRIU 로그
+    │   ├── criu-page-server.log      # Page server 로그
+    │   ├── workload_status_pre_dump.txt         # 프로세스 상태
+    │   ├── workload_stdout_pre_dump.log         # 워크로드 출력
+    │   ├── workload_stdout_pre_dump.log.raw     # 원본 strace 출력
+    │   └── workload_stdout_pre_dump.log.info    # 로그 수집 메타데이터
+    ├── dest/                         # Destination 노드 로그
+    │   ├── 1/                        # 복원된 체크포인트
+    │   ├── criu-restore.log          # Restore CRIU 로그
+    │   ├── criu-lazy-pages.log       # Lazy pages 로그 (해당 시)
+    │   ├── workload_status_post_restore.txt     # 복원 후 프로세스 상태
+    │   ├── workload_stdout_post_restore.log     # 복원 후 워크로드 출력
+    │   ├── workload_stdout_post_restore.log.raw
+    │   └── workload_stdout_post_restore.log.info
+    └── metrics.json                  # 실험 메트릭
+```
+
+### 워크로드 stdout/stderr 캡처
+
+워크로드의 stdout/stderr는 `/dev/null`로 리다이렉트되지만, strace를 사용하여 write 시스템 콜을 캡처합니다:
+
+- **pre_dump 단계**: 워크로드 시작부터 dump 직전까지의 모든 출력 캡처
+- **post_restore 단계**: 복원 후 6초간의 출력 캡처
+- **파싱**: strace raw 출력을 파싱하여 읽기 쉬운 형식으로 변환
+- **메타데이터**: `.info` 파일에 수집 과정 상세 정보 저장
+
+### 로그 확인
+
+```bash
+# 실험 실행
+python3 run_experiment.py --workload matmul
+
+# 결과 확인
+cd results/matmul_<timestamp>
+
+# Source 노드 워크로드 출력 확인
+cat source/workload_stdout_pre_dump.log
+
+# Destination 노드 복원 후 출력 확인
+cat dest/workload_stdout_post_restore.log
+
+# CRIU dump 로그 확인
+cat source/criu-dump.log
+
+# 프로세스 상태 확인
+cat source/workload_status_pre_dump.txt
+```
+
+### 실패 시 로그 수집
+
+실험이 실패하거나 예외가 발생해도 로그는 자동으로 수집됩니다:
+- 실패한 실험의 결과 디렉토리는 `_failed` 또는 `_exception` 접미사가 붙습니다
+- 실패 지점까지의 모든 로그가 수집됩니다
+- CRIU 에러 메시지는 해당 `.log` 파일에서 확인 가능합니다
 
 ---
 
@@ -184,42 +311,46 @@ python3 run_experiment.py --workload matmul --matrix-size 1024 --interval 0.5
 
 ---
 
-### 3. Redis 유사 인메모리 데이터베이스 워크로드
+### 3. Redis 인메모리 데이터베이스 워크로드
 
-**시나리오**: Redis/Memcached 유사 인메모리 키-값 저장소 시뮬레이션 + 지속적인 읽기/쓰기 작업
+**시나리오**: 실제 redis-server를 사용하여 인메모리 키-값 데이터베이스 워크로드 시뮬레이션 + 지속적인 읽기/쓰기 작업
 
 **사용 사례**:
-- Redis/Memcached 캐싱 레이어
+- Redis 캐싱 레이어
 - 인메모리 세션 저장소
 - 실시간 데이터 캐시
 - 키-값 데이터베이스
+- 실제 Redis 프로세스의 체크포인트/복원 테스트
 
 **명령어**:
 ```bash
-# 기본: 100K 키, 1KB 값, 80% 읽기
+# 기본: 100K 키, 1KB 값
 python3 run_experiment.py --workload redis
 
 # 대형 캐시 (1M 키, 4KB 값)
 python3 run_experiment.py --workload redis --num-keys 1000000 --value-size 4096
 
-# 쓰기 중심 워크로드
-python3 run_experiment.py --workload redis --num-keys 100000 --read-ratio 0.3
+# 커스텀 Redis 포트
+python3 run_experiment.py --workload redis --redis-port 6380 --num-keys 100000
 ```
 
 **파라미터**:
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
+| `--redis-port` | 6379 | Redis 서버 포트 |
 | `--num-keys` | 100000 | 키 개수 |
 | `--value-size` | 1024 | 값 크기 (바이트) |
-| `--ops-per-sec` | 1000 | 목표 초당 작업 수 |
-| `--read-ratio` | 0.8 | 읽기 작업 비율 (0.0-1.0) |
 
-**메모리 사용량**: `~num_keys * (12 + value_size) bytes`
+**메모리 사용량**: `~num_keys * (overhead + value_size)` + Redis 오버헤드
 
 **특징**:
+- 실제 redis-server 프로세스 사용 (TCP 소켓 포함)
 - 복원 후 데이터 무결성 검증 (체크섬 비교)
-- 히트율 통계
-- 검증을 위한 결정적 값 생성
+- Python redis 클라이언트로 작업 수행
+- TCP 소켓을 통한 실제 네트워크 통신
+- CRIU --tcp-established 플래그 필요
+
+**의존성**: `redis-server`, `redis` (Python 패키지)
 
 ---
 
@@ -252,6 +383,7 @@ python3 run_experiment.py --workload ml_training --model-size large --batch-size
 | `--batch-size` | 64 | 학습 배치 크기 |
 | `--epochs` | 0 | 에폭 수 (0=무한) |
 | `--learning-rate` | 0.001 | 학습률 |
+| `--dataset-size` | model-size 기본값 | 데이터셋 크기 (모델 기본값 덮어쓰기) |
 
 **모델 크기별 구성**:
 | 크기 | 입력 | 히든 레이어 | 출력 | 데이터셋 | 파라미터 수 |
@@ -264,51 +396,9 @@ python3 run_experiment.py --workload ml_training --model-size large --batch-size
 
 ---
 
-### 5. Jupyter 노트북 시뮬레이션 워크로드
+### 5. 비디오 처리 워크로드
 
-**시나리오**: 다양한 셀 타입(import, 데이터 로드, 계산, 시각화, 모델 학습)으로 대화형 Jupyter 노트북 세션 시뮬레이션
-
-**사용 사례**:
-- 대화형 데이터 과학 세션
-- 연구 컴퓨팅 환경
-- 교육용 컴퓨팅 랩
-- 탐색적 데이터 분석
-
-**명령어**:
-```bash
-# 기본: 지속적 셀 실행
-python3 run_experiment.py --workload jupyter
-
-# 제한된 셀 수 + 빠른 실행
-python3 run_experiment.py --workload jupyter --num-cells 100 --cell-interval 1.0
-
-# 느린 대화형 세션 시뮬레이션
-python3 run_experiment.py --workload jupyter --cell-interval 10.0
-```
-
-**파라미터**:
-| 파라미터 | 기본값 | 설명 |
-|----------|--------|------|
-| `--num-cells` | 0 | 실행할 셀 수 (0=무한) |
-| `--cell-interval` | 3.0 | 셀 실행 간격 (초) |
-
-**셀 타입 분포**:
-| 타입 | 확률 | 설명 |
-|------|------|------|
-| import | 5% | 라이브러리 임포트 |
-| markdown | 15% | 문서화 셀 |
-| data_load | 15% | 데이터 로딩 |
-| computation | 35% | 수치 계산 |
-| visualization | 15% | 시각화 생성 |
-| model | 15% | 모델 학습 |
-
-**의존성**: `numpy` (선택사항이지만 권장)
-
----
-
-### 6. 비디오 처리 워크로드
-
-**시나리오**: ffmpeg과 유사한 비디오 인코딩/디코딩 작업 시뮬레이션, 합성 비디오 프레임 처리
+**시나리오**: 실제 ffmpeg를 사용한 비디오 인코딩/디코딩 작업, 합성 비디오 프레임 처리
 
 **사용 사례**:
 - 비디오 트랜스코딩 작업
@@ -333,7 +423,8 @@ python3 run_experiment.py --workload video --resolution 1280x720 --fps 60
 |----------|--------|------|
 | `--resolution` | 1920x1080 | 비디오 해상도 (WxH) |
 | `--fps` | 30 | 초당 프레임 수 |
-| `--duration` | 0 | 지속 시간 (초, 0=무한) |
+| `--duration` | 300 | 지속 시간 (초, file 모드용) |
+| `--video-mode` | live | 비디오 출력 모드 (file/live) |
 
 **일반 해상도**:
 | 이름 | 해상도 | 프레임 크기 |
@@ -342,16 +433,17 @@ python3 run_experiment.py --workload video --resolution 1280x720 --fps 60
 | 1080p | 1920x1080 | 5.9 MB |
 | 4K | 3840x2160 | 23.7 MB |
 
-**의존성**: `numpy` (선택사항이지만 권장)
+**의존성**: `ffmpeg` (필수)
 
 **특징**:
-- I-프레임 및 P-프레임 시뮬레이션 (GOP 패턴)
-- zlib을 사용한 압축
-- 프레임 레이트 유지
+- 실제 ffmpeg 프로세스 사용 (Python wrapper + ffmpeg 프로세스 트리)
+- testsrc2 필터로 합성 비디오 생성
+- file 모드: 단일 MP4 파일 생성
+- live 모드: segment 파일 생성 (CRIU 복원 시 권장)
 
 ---
 
-### 7. 데이터 처리 워크로드 (Pandas 유사)
+### 6. 데이터 처리 워크로드 (Pandas 유사)
 
 **시나리오**: Pandas/Spark와 유사한 대규모 데이터셋에서의 ETL 및 데이터 처리 작업 시뮬레이션
 
@@ -668,12 +760,11 @@ Total Experiment Duration: 95.67s
 
 ## 워크로드 요약 테이블
 
-| 워크로드 | 시나리오 | 메모리 패턴 | 의존성 |
-|----------|----------|-------------|--------|
-| `memory` | 메모리 할당 | 증가형 | 없음 |
-| `matmul` | HPC/과학 계산 | 정적 | numpy |
-| `redis` | 캐싱/KV 저장소 | 초기화 후 정적 | 없음 |
-| `ml_training` | 딥러닝 학습 | 정적 | torch |
-| `jupyter` | 대화형 데이터 과학 | 증가형 | numpy (선택) |
-| `video` | 비디오 트랜스코딩 | 정적 | numpy (선택) |
-| `dataproc` | ETL/배치 분석 | 초기화 후 정적 | numpy |
+| 워크로드 | 시나리오 | 메모리 패턴 | 의존성 | 특징 |
+|----------|----------|-------------|--------|------|
+| `memory` | 메모리 할당 | 증가형 | 없음 | Pre-dump 효율성 테스트에 최적 |
+| `matmul` | HPC/과학 계산 | 정적 | numpy | CPU 집약적 계산 |
+| `redis` | 실제 Redis 서버 | 초기화 후 정적 | redis-server, redis | TCP 소켓, 실제 프로세스 |
+| `ml_training` | 딥러닝 학습 | 정적 | torch | GPU 사용 가능 |
+| `video` | 비디오 트랜스코딩 | 정적 | ffmpeg | 실제 ffmpeg 프로세스, live/file 모드 |
+| `dataproc` | ETL/배치 분석 | 초기화 후 정적 | numpy | Pandas/Spark 유사 작업 |
