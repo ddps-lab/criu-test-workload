@@ -70,6 +70,7 @@ apt-get install -y \
 
 # Install documentation tools (optional, for building docs)
 apt-get install -y --no-install-recommends asciidoc xmlto
+snap install --classic aws-cli
 
 # 3. Build CRIU from ddps-lab/criu-s3
 echo "[3/7] Building CRIU (ddps-lab/criu-s3)..."
