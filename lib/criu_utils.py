@@ -13,6 +13,8 @@ from .config import ConfigLoader, ConfigValidator
 from .checkpoint import CheckpointManager
 from .transfer import TransferManager
 from .timing import MetricsCollector
+from .s3_config import S3Config, S3Type
+from .lazy_mode import LazyMode, LazyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -313,8 +315,14 @@ class CRIUExperiment:
     def _run_final_dump(self):
         """Perform final CRIU dump."""
         strategy = self.checkpoint_config['strategy']
-        lazy_pages = strategy.get('lazy_pages', False)
-        page_server_port = strategy.get('page_server_port', 22222)
+
+        # Build LazyConfig from strategy settings
+        lazy_mode_str = strategy.get('lazy_mode', 'none')
+        lazy_config = LazyConfig(
+            mode=LazyMode(lazy_mode_str),
+            page_server_port=strategy.get('page_server_port', 27),
+            prefetch_workers=strategy.get('prefetch_workers', 4),
+        )
 
         # Get workload type for CRIU flags
         workload_type = self.experiment_config.get('workload_type', 'memory')
@@ -324,7 +332,7 @@ class CRIUExperiment:
             self.source_host, 'pre_dump', self.ssh_user
         )
 
-        logger.info(f"Performing final dump (lazy_pages={lazy_pages})")
+        logger.info(f"Performing final dump (lazy_mode={lazy_config.mode.value})")
 
         self.metrics.start_timer('final_dump')
 
@@ -332,9 +340,8 @@ class CRIUExperiment:
             self.source_host,
             self.workload_pid,
             self.checkpoint_iteration,
-            lazy_pages,
-            page_server_port,
-            self.ssh_user,
+            lazy_config=lazy_config,
+            username=self.ssh_user,
             workload_type=workload_type
         )
 
@@ -355,11 +362,12 @@ class CRIUExperiment:
 
         self.metrics.record_final_dump(
             final_dump_metric.duration,
-            {'lazy_pages': lazy_pages, 'rsync_duration': rsync_duration}
+            {'lazy_config': lazy_config.to_dict(), 'rsync_duration': rsync_duration}
         )
 
         self.checkpoint_iteration = result['iteration']
         self.final_checkpoint_dir = result['checkpoint_dir']
+        self.lazy_config = lazy_config  # Store for restore phase
 
         logger.info(f"Final dump completed in {final_dump_metric.duration:.2f}s")
 
@@ -405,9 +413,8 @@ class CRIUExperiment:
 
     def _restore(self):
         """Restore process on destination node."""
-        strategy = self.checkpoint_config['strategy']
-        lazy_pages = strategy.get('lazy_pages', False)
-        page_server_port = strategy.get('page_server_port', 22222)
+        # Use lazy_config from dump phase (set in _run_final_dump)
+        lazy_config = getattr(self, 'lazy_config', LazyConfig(mode=LazyMode.NONE))
 
         # Get workload type for CRIU flags
         workload_type = self.experiment_config.get('workload_type', 'memory')
@@ -427,19 +434,33 @@ class CRIUExperiment:
             # rsync or S3 - use destination working dir
             dest_checkpoint_dir = f"{self.checkpoint_mgr.working_dir}/{self.checkpoint_iteration}"
 
-        logger.info(f"Restoring from {dest_checkpoint_dir} on {self.dest_host}")
+        logger.info(f"Restoring from {dest_checkpoint_dir} on {self.dest_host} (lazy_mode={lazy_config.mode.value})")
 
         self.metrics.start_timer('restore')
 
-        result = self.checkpoint_mgr.restore(
-            self.dest_host,
-            dest_checkpoint_dir,
-            lazy_pages,
-            self.source_host if lazy_pages else None,
-            page_server_port,
-            self.ssh_user,
-            workload_type=workload_type
-        )
+        # Choose restore method based on whether S3 is needed
+        if lazy_config.requires_s3() and transfer_method == 's3':
+            # Use S3-based restore for LAZY_PREFETCH and LIVE_MIGRATION_PREFETCH
+            s3_config = S3Config.from_dict(self.config.get('s3', {}))
+            result = self.checkpoint_mgr.restore_with_s3(
+                self.dest_host,
+                dest_checkpoint_dir,
+                s3_config=s3_config,
+                lazy_config=lazy_config,
+                page_server_host=self.source_host if lazy_config.requires_page_server() else None,
+                username=self.ssh_user,
+                workload_type=workload_type
+            )
+        else:
+            # Use standard restore for NONE, LAZY, LIVE_MIGRATION
+            result = self.checkpoint_mgr.restore(
+                self.dest_host,
+                dest_checkpoint_dir,
+                lazy_config=lazy_config,
+                page_server_host=self.source_host if lazy_config.requires_page_server() else None,
+                username=self.ssh_user,
+                workload_type=workload_type
+            )
 
         restore_metric = self.metrics.stop_timer('restore')
 
@@ -454,7 +475,7 @@ class CRIUExperiment:
         self.metrics.record_restore(
             restore_metric.duration,
             {
-                'lazy_pages': lazy_pages,
+                'lazy_config': lazy_config.to_dict(),
                 'process_running': verify_result['is_running'],
                 'restored_pids': verify_result['pids']
             }

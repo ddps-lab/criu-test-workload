@@ -9,6 +9,9 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 import logging
 
+from .s3_config import S3Config, S3Type
+from .lazy_mode import LazyMode, LazyConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -378,8 +381,9 @@ class CheckpointManager:
             'log_file': log_file
         }
 
-    def final_dump(self, host: str, pid: str, last_iteration: int, lazy_pages: bool = False,
-                   page_server_port: int = 22222, username: str = 'ubuntu',
+    def final_dump(self, host: str, pid: str, last_iteration: int,
+                   lazy_config: LazyConfig = None,
+                   username: str = 'ubuntu',
                    workload_type: str = None) -> Dict[str, Any]:
         """
         Perform final CRIU dump.
@@ -388,8 +392,7 @@ class CheckpointManager:
             host: Remote host IP
             pid: Process PID
             last_iteration: Last pre-dump iteration number
-            lazy_pages: Enable lazy-pages mode
-            page_server_port: Port for lazy-pages server
+            lazy_config: Lazy mode configuration (optional, defaults to NONE)
             username: SSH username
             workload_type: Type of workload (for workload-specific flags)
 
@@ -397,6 +400,10 @@ class CheckpointManager:
             Dictionary with dump metrics
         """
         client = self.get_ssh_client(host, username)
+
+        # Default to no lazy mode if not specified
+        if lazy_config is None:
+            lazy_config = LazyConfig(mode=LazyMode.NONE)
 
         # Create checkpoint directory
         iteration = last_iteration + 1
@@ -406,29 +413,40 @@ class CheckpointManager:
         # Build CRIU dump command
         # -t pid: checkpoint entire process tree starting from pid
         log_file = f"{checkpoint_dir}/criu-dump.log"
-        criu_cmd = f"sudo criu dump -D {checkpoint_dir} -t {pid} --shell-job --track-mem"
-        criu_cmd += f" --log-file {log_file} -v4"
+        criu_cmd_parts = [
+            "sudo", "criu", "dump",
+            "-D", checkpoint_dir,
+            "-t", pid,
+            "--shell-job", "--track-mem",
+            "--log-file", log_file, "-v4"
+        ]
 
         # Redis needs --tcp-established for Python-Redis TCP connection
         if workload_type == 'redis':
-            criu_cmd += " --tcp-established"
+            criu_cmd_parts.append("--tcp-established")
 
         # Add --prev-images-dir if there were pre-dumps
         if last_iteration > 0:
-            criu_cmd += f" --prev-images-dir ../{last_iteration}"
+            criu_cmd_parts.extend(["--prev-images-dir", f"../{last_iteration}"])
 
-        # Add lazy-pages options
-        if lazy_pages:
-            criu_cmd += f" --lazy-pages --address 0.0.0.0 --port {page_server_port}"
-            # Run in background for lazy-pages
+        # Add lazy-pages options for live migration mode
+        # This starts the page-server that serves pages over network
+        if lazy_config.requires_page_server():
+            criu_cmd_parts.extend(lazy_config.get_dump_args())
+
+        criu_cmd = " ".join(criu_cmd_parts)
+
+        # For live migration (page-server mode), run in background
+        run_in_background = lazy_config.requires_page_server()
+        if run_in_background:
             criu_cmd += " &"
 
-        logger.info(f"Final dump on {host} (iteration {iteration}, lazy_pages={lazy_pages}, log: {log_file})")
+        logger.info(f"Final dump on {host} (iteration {iteration}, lazy_mode={lazy_config.mode.value}, log: {log_file})")
 
         start_time = time.time()
 
-        if lazy_pages:
-            # Execute in background
+        if run_in_background:
+            # Execute in background (for live migration with page-server)
             client.execute_background(criu_cmd)
 
             # Wait for dump to complete by monitoring file changes
@@ -453,7 +471,7 @@ class CheckpointManager:
             client.execute(wait_cmd, timeout=300)
 
         else:
-            # Execute synchronously
+            # Execute synchronously (for standard or lazy without page-server)
             stdout, stderr, status = client.execute(criu_cmd, timeout=300)
 
             if status != 0:
@@ -494,23 +512,30 @@ class CheckpointManager:
             'iteration': iteration,
             'duration': duration,
             'checkpoint_dir': checkpoint_dir,
-            'lazy_pages': lazy_pages,
+            'lazy_config': lazy_config.to_dict(),
             'log_file': log_file
         }
 
-    def restore(self, host: str, checkpoint_dir: str, lazy_pages: bool = False,
-                page_server_host: Optional[str] = None, page_server_port: int = 22222,
+    def restore(self, host: str, checkpoint_dir: str,
+                lazy_config: LazyConfig = None,
+                page_server_host: Optional[str] = None,
                 username: str = 'ubuntu', pid_file: Optional[str] = None,
                 workload_type: str = None) -> Dict[str, Any]:
         """
         Restore process from checkpoint.
 
+        Supports multiple lazy modes:
+        - NONE: Standard restore, all pages must be present locally
+        - LAZY: Lazy-pages from local directory
+        - LAZY_PREFETCH: Not supported here (use restore_with_s3)
+        - LIVE_MIGRATION: Lazy-pages connects to source page-server
+        - LIVE_MIGRATION_PREFETCH: Not supported here (use restore_with_s3)
+
         Args:
             host: Destination host IP
             checkpoint_dir: Checkpoint directory path
-            lazy_pages: Use lazy-pages mode
-            page_server_host: Page server host (for lazy-pages)
-            page_server_port: Page server port
+            lazy_config: Lazy mode configuration (optional, defaults to NONE)
+            page_server_host: Source node address for live migration
             username: SSH username
             pid_file: Optional path to write restored process PID
             workload_type: Type of workload (for workload-specific flags)
@@ -520,36 +545,59 @@ class CheckpointManager:
         """
         client = self.get_ssh_client(host, username)
 
+        # Default to no lazy mode if not specified
+        if lazy_config is None:
+            lazy_config = LazyConfig(mode=LazyMode.NONE)
+
+        requires_lazy = lazy_config.requires_lazy_pages()
+
         # Log file paths
         restore_log_file = f"{checkpoint_dir}/criu-restore.log"
-        lazy_pages_log_file = f"{checkpoint_dir}/criu-lazy-pages.log" if lazy_pages else None
+        lazy_pages_log_file = f"{checkpoint_dir}/criu-lazy-pages.log" if requires_lazy else None
 
-        # If using lazy-pages, start page server first
-        if lazy_pages and page_server_host:
-            logger.info(f"Starting page server on {host} (log: {lazy_pages_log_file})")
-            page_server_cmd = f"sudo criu lazy-pages --images-dir {checkpoint_dir} --page-server --address {page_server_host} --port {page_server_port}"
-            page_server_cmd += f" --log-file {lazy_pages_log_file} -v4 &"
-            client.execute_background(page_server_cmd)
-            time.sleep(2)  # Give page server time to start
+        # Start lazy-pages daemon if needed
+        if requires_lazy:
+            lazy_pages_cmd_parts = [
+                "sudo", "criu", "lazy-pages",
+                "--images-dir", checkpoint_dir,
+                "--log-file", lazy_pages_log_file, "-v4"
+            ]
+
+            # Add mode-specific arguments
+            lazy_pages_cmd_parts.extend(lazy_config.get_lazy_pages_daemon_args(page_server_host))
+
+            lazy_pages_cmd = " ".join(lazy_pages_cmd_parts) + " &"
+
+            logger.info(f"Starting lazy-pages daemon on {host} (mode={lazy_config.mode.value}, log: {lazy_pages_log_file})")
+            logger.debug(f"Lazy-pages command: {lazy_pages_cmd}")
+            client.execute_background(lazy_pages_cmd)
+            time.sleep(2)  # Give lazy-pages daemon time to start
 
         # Build CRIU restore command
         # -d (--detach): detach from restored process immediately after restore
         # This allows us to measure actual restore time, not process runtime
         # --pidfile: write restored process PID to file for verification
-        criu_cmd = f"sudo criu restore -D {checkpoint_dir} --shell-job -d"
-        criu_cmd += f" --log-file {restore_log_file} -v4"
+        criu_cmd_parts = [
+            "sudo", "criu", "restore",
+            "-D", checkpoint_dir,
+            "--shell-job", "-d",
+            "--log-file", restore_log_file, "-v4"
+        ]
 
         # Redis needs --tcp-established for Python-Redis TCP connection
         if workload_type == 'redis':
-            criu_cmd += " --tcp-established"
+            criu_cmd_parts.append("--tcp-established")
 
         if pid_file:
-            criu_cmd += f" --pidfile {pid_file}"
+            criu_cmd_parts.extend(["--pidfile", pid_file])
 
-        if lazy_pages:
-            criu_cmd += " --lazy-pages"
+        # Add lazy-pages option to restore command
+        criu_cmd_parts.extend(lazy_config.get_restore_args())
 
-        logger.info(f"Restoring on {host} from {checkpoint_dir} (log: {restore_log_file})")
+        criu_cmd = " ".join(criu_cmd_parts)
+
+        logger.info(f"Restoring on {host} from {checkpoint_dir} (lazy_mode={lazy_config.mode.value}, log: {restore_log_file})")
+        logger.debug(f"Restore command: {criu_cmd}")
 
         start_time = time.time()
         stdout, stderr, status = client.execute(criu_cmd, timeout=300)
@@ -585,7 +633,7 @@ class CheckpointManager:
         return {
             'success': True,
             'duration': duration,
-            'lazy_pages': lazy_pages,
+            'lazy_config': lazy_config.to_dict(),
             'log_file': restore_log_file,
             'lazy_pages_log_file': lazy_pages_log_file
         }
@@ -1130,6 +1178,126 @@ class CheckpointManager:
             logger.warning(f"Restored process is NOT running")
 
         return result
+
+    def restore_with_s3(self, host: str, checkpoint_dir: str,
+                         s3_config: S3Config, lazy_config: LazyConfig,
+                         page_server_host: Optional[str] = None,
+                         username: str = 'ubuntu', workload_type: str = None) -> Dict[str, Any]:
+        """
+        Restore process using S3 object storage for page fetching.
+
+        Supports modes that require S3:
+        - LAZY_PREFETCH: Lazy-pages with async prefetch from S3
+        - LIVE_MIGRATION_PREFETCH: S3 pre-copy + page-server post-copy
+
+        For modes not requiring S3 (NONE, LAZY, LIVE_MIGRATION), use restore() instead.
+
+        Args:
+            host: Destination host IP
+            checkpoint_dir: Checkpoint directory path (with non-page files)
+            s3_config: S3 configuration object
+            lazy_config: Lazy mode configuration
+            page_server_host: Source node address for live migration modes
+            username: SSH username
+            workload_type: Type of workload (for workload-specific flags)
+
+        Returns:
+            Dictionary with restore metrics
+        """
+        # Validate that lazy_config requires S3
+        if not lazy_config.requires_s3():
+            logger.warning(f"restore_with_s3 called with mode {lazy_config.mode.value} that doesn't require S3. "
+                          f"Consider using restore() instead.")
+
+        client = self.get_ssh_client(host, username)
+
+        requires_lazy = lazy_config.requires_lazy_pages()
+
+        # Log file paths
+        restore_log_file = f"{checkpoint_dir}/criu-restore.log"
+        lazy_pages_log_file = f"{checkpoint_dir}/criu-lazy-pages.log" if requires_lazy else None
+
+        # Build base CRIU restore command
+        criu_cmd_parts = ["sudo", "criu", "restore", "-D", checkpoint_dir, "--shell-job", "-d"]
+        criu_cmd_parts.extend(["--log-file", restore_log_file, "-v4"])
+
+        # Redis needs --tcp-established
+        if workload_type == 'redis':
+            criu_cmd_parts.append("--tcp-established")
+
+        if requires_lazy:
+            # Start lazy-pages daemon first
+            # Combine LazyConfig args (page-server, prefetch) with S3Config args (object storage)
+            lazy_pages_cmd_parts = [
+                "sudo", "criu", "lazy-pages",
+                "--images-dir", checkpoint_dir,
+                "--log-file", lazy_pages_log_file, "-v4"
+            ]
+
+            # Add lazy mode specific args (page-server for live migration, prefetch settings)
+            lazy_pages_cmd_parts.extend(lazy_config.get_lazy_pages_daemon_args(page_server_host))
+
+            # Add S3 object storage args
+            lazy_pages_cmd_parts.extend(s3_config.get_criu_lazy_pages_args(lazy_config))
+
+            lazy_pages_cmd = " ".join(lazy_pages_cmd_parts) + " &"
+
+            logger.info(f"Starting lazy-pages daemon on {host} (mode={lazy_config.mode.value}, log: {lazy_pages_log_file})")
+            logger.debug(f"Lazy-pages command: {lazy_pages_cmd}")
+            client.execute_background(lazy_pages_cmd)
+            time.sleep(2)  # Give lazy-pages time to start
+
+            # Add lazy-pages option to restore command
+            criu_cmd_parts.extend(lazy_config.get_restore_args())
+
+            # Add object storage options to restore command
+            criu_cmd_parts.extend(s3_config.get_criu_object_storage_args())
+
+        criu_cmd = " ".join(criu_cmd_parts)
+
+        logger.info(f"Restoring on {host} from {checkpoint_dir} (mode={lazy_config.mode.value}, log: {restore_log_file})")
+        logger.debug(f"Restore command: {criu_cmd}")
+
+        start_time = time.time()
+        stdout, stderr, status = client.execute(criu_cmd, timeout=300)
+        duration = time.time() - start_time
+
+        # Fix permissions for log collection
+        client.execute(f"sudo chmod -R a+r {checkpoint_dir}")
+
+        if status != 0:
+            # Try to get more details from CRIU log
+            log_content = ""
+            log_stdout, _, log_status = client.execute(f"tail -30 {restore_log_file} 2>/dev/null")
+            if log_status == 0:
+                log_content = log_stdout
+
+            error_msg = stderr if stderr else "Unknown error (check CRIU log)"
+            logger.error(f"S3 restore failed: {error_msg}")
+            if log_content:
+                logger.error(f"CRIU log tail:\n{log_content}")
+
+            return {
+                'success': False,
+                'duration': duration,
+                'error': error_msg,
+                'stdout': stdout,
+                'log_file': restore_log_file,
+                'log_content': log_content,
+                's3_config': s3_config.to_dict(),
+                'lazy_config': lazy_config.to_dict()
+            }
+
+        logger.info(f"S3 restore completed in {duration:.2f}s")
+
+        return {
+            'success': True,
+            'duration': duration,
+            'lazy_config': lazy_config.to_dict(),
+            's3_config': s3_config.to_dict(),
+            'log_file': restore_log_file,
+            'lazy_pages_log_file': lazy_pages_log_file
+        }
 
     def close_all_connections(self):
         """Close all SSH connections."""

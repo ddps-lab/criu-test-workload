@@ -89,6 +89,8 @@ setcap cap_checkpoint_restore+eip /usr/local/bin/criu
 # Verify CRIU installation
 echo "CRIU installed: $(which criu)"
 criu --version
+cd /tmp
+rm -rf criu-s3
 
 # 4. Install Python packages
 echo "[4/7] Installing Python packages..."

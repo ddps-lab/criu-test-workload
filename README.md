@@ -29,6 +29,8 @@ criu_workload/
 │   ├── checkpoint.py             # SSH 기반 CRIU 작업 + 로그 수집
 │   ├── transfer.py               # 체크포인트 전송 (rsync/S3/EFS/EBS)
 │   ├── timing.py                 # 메트릭 수집
+│   ├── lazy_mode.py              # LazyMode/LazyConfig (복원 모드 설정)
+│   ├── s3_config.py              # S3 Object Storage 설정
 │   └── criu_utils.py             # 메인 오케스트레이터
 ├── workloads/                    # 워크로드 구현체
 │   ├── base_workload.py          # 추상 베이스 클래스
@@ -602,20 +604,95 @@ python3 run_experiment.py --strategy full
 
 **적합한 워크로드**: 작고 정적인 워크로드 또는 베이스라인 측정
 
-### 3. Lazy Pages
+### 3. Lazy Mode (복원 모드)
 
-복원 후 온디맨드로 페이지를 로딩합니다.
+`--lazy-mode` 옵션으로 다양한 복원 모드를 선택할 수 있습니다.
 
 ```bash
-python3 run_experiment.py --lazy-pages
+# 표준 복원 (기본값)
+python3 run_experiment.py --lazy-mode none
+
+# 로컬 lazy-pages
+python3 run_experiment.py --lazy-mode lazy
+
+# S3 async prefetch (S3 전송 방식 필요)
+python3 run_experiment.py --lazy-mode lazy-prefetch --transfer-method s3
+
+# Page-server 기반 live migration
+python3 run_experiment.py --lazy-mode live-migration
+
+# S3 pre-copy + page-server post-copy (S3 전송 방식 필요)
+python3 run_experiment.py --lazy-mode live-migration-prefetch --transfer-method s3
 ```
 
-**동작 원리**:
-1. 최소한의 페이지로 즉시 프로세스 복원
-2. 나머지 페이지는 페이지 폴트 시 온디맨드로 가져옴
-3. 복원 시간 단축, 복원 후 지연 시간 증가
+**Lazy Mode 종류**:
 
-**적합한 워크로드**: 빠른 복원이 중요한 대용량 메모리 워크로드
+| 모드 | 설명 | S3 필요 | Page Server |
+|------|------|---------|-------------|
+| `none` | 표준 복원, 모든 페이지 로컬에 있어야 함 | 아니오 | 아니오 |
+| `lazy` | 로컬 디렉토리에서 lazy-pages | 아니오 | 아니오 |
+| `lazy-prefetch` | S3에서 async prefetch | **예** | 아니오 |
+| `live-migration` | Page-server 기반 post-copy | 아니오 | **예** |
+| `live-migration-prefetch` | S3 pre-copy + page-server post-copy | **예** | **예** |
+
+**동작 원리**:
+
+1. **none**: 전통적인 복원. 모든 체크포인트 파일이 로컬에 있어야 함
+2. **lazy**: 최소한의 페이지로 즉시 복원, 나머지는 페이지 폴트 시 로컬에서 가져옴
+3. **lazy-prefetch**: lazy 모드 + S3에서 백그라운드로 페이지를 미리 가져옴 (async prefetch)
+4. **live-migration**: Source 노드의 page-server가 페이지를 네트워크로 전송 (post-copy)
+5. **live-migration-prefetch**: S3를 통한 pre-copy와 page-server를 통한 post-copy 동시 사용
+
+**적합한 워크로드**:
+- `none`: 작은 워크로드 또는 빠른 네트워크 환경
+- `lazy`/`lazy-prefetch`: 빠른 복원이 중요한 대용량 메모리 워크로드
+- `live-migration`/`live-migration-prefetch`: 다운타임 최소화가 중요한 경우
+
+### 4. S3 Object Storage 전송
+
+S3를 통한 체크포인트 전송 및 복원을 지원합니다.
+
+```bash
+# Standard S3 + Lazy restore
+python3 run_experiment.py \
+  --workload memory \
+  --transfer-method s3 \
+  --lazy-mode lazy \
+  --s3-type standard \
+  --s3-upload-bucket my-bucket \
+  --s3-download-endpoint s3.ap-northeast-2.amazonaws.com \
+  --s3-prefix checkpoints/exp1/
+
+# CloudFront를 통한 다운로드 (업로드는 S3)
+python3 run_experiment.py \
+  --transfer-method s3 \
+  --lazy-mode lazy-prefetch \
+  --s3-type cloudfront \
+  --s3-upload-bucket my-bucket \
+  --s3-download-endpoint d38wnqcoxt1uv7.cloudfront.net
+
+# Express One Zone (저지연)
+python3 run_experiment.py \
+  --transfer-method s3 \
+  --lazy-mode lazy-prefetch \
+  --s3-type express-one-zone \
+  --s3-upload-bucket my-bucket--usw2-az1--x-s3 \
+  --s3-download-endpoint s3express-usw2-az1.us-west-2.amazonaws.com \
+  --s3-region us-west-2
+```
+
+**S3 타입**:
+
+| 타입 | 설명 | 사용 사례 |
+|------|------|----------|
+| `standard` | 기본 S3 | 일반적인 사용 |
+| `cloudfront` | CDN 경유 다운로드 | 글로벌 배포, 캐싱 |
+| `express-one-zone` | 단일 AZ 저지연 | 같은 AZ 내 빠른 복원 |
+
+**워크플로우**:
+1. Source 노드에서 dump 후 S3에 업로드
+2. Dest 노드에서 S3에서 다운로드 (lazy 모드에서는 pages-*.img 제외)
+3. CRIU restore 시 필요한 페이지를 S3에서 on-demand 또는 async prefetch로 가져옴
 
 ---
 

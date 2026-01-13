@@ -11,6 +11,9 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import logging
 
+from .s3_config import S3Config, S3Type
+from .lazy_mode import LazyMode, LazyConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -327,3 +330,159 @@ class TransferManager:
                 'error': str(e),
                 'stderr': e.stderr
             }
+
+    def upload_to_s3_with_config(self, source_host: str, checkpoint_dir: str,
+                                  s3_config: S3Config) -> Dict[str, Any]:
+        """
+        Upload checkpoint to S3 using S3Config.
+
+        Args:
+            source_host: Source host IP
+            checkpoint_dir: Checkpoint directory path on source host
+            s3_config: S3 configuration object
+
+        Returns:
+            Upload metrics
+        """
+        upload_cmd = s3_config.get_upload_cmd(checkpoint_dir)
+
+        ssh_cmd = [
+            'ssh', f'{self.ssh_user}@{source_host}',
+            upload_cmd
+        ]
+
+        logger.info(f"Uploading to S3: {s3_config.get_s3_uri()}")
+
+        try:
+            start_time = time.time()
+            result = subprocess.run(
+                ssh_cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            upload_duration = time.time() - start_time
+
+            # Get checkpoint size
+            size_cmd = ['ssh', f'{self.ssh_user}@{source_host}', f'du -sm {checkpoint_dir}']
+            size_result = subprocess.run(size_cmd, capture_output=True, text=True)
+            size_mb = float(size_result.stdout.split()[0]) if size_result.returncode == 0 else 0
+
+            return {
+                'success': True,
+                's3_uri': s3_config.get_s3_uri(),
+                's3_type': s3_config.s3_type.value,
+                'size_mb': size_mb,
+                'upload_duration': upload_duration
+            }
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"S3 upload failed: {e.stderr}")
+            return {
+                'success': False,
+                'error': str(e),
+                'stderr': e.stderr
+            }
+
+    def download_from_s3_with_config(self, dest_host: str, dest_dir: str,
+                                      s3_config: S3Config,
+                                      lazy_config: LazyConfig = None) -> Dict[str, Any]:
+        """
+        Download checkpoint from S3 using S3Config.
+
+        For lazy restore modes, excludes pages-*.img files (CRIU fetches on-demand).
+
+        Args:
+            dest_host: Destination host IP
+            dest_dir: Destination directory on host
+            s3_config: S3 configuration object
+            lazy_config: LazyConfig for determining if pages should be excluded
+
+        Returns:
+            Download metrics
+        """
+        # Exclude pages for lazy modes (any mode except NONE)
+        exclude_pages = lazy_config is not None and lazy_config.mode != LazyMode.NONE
+        download_cmd = s3_config.get_download_cmd(dest_dir, exclude_pages=exclude_pages)
+
+        ssh_cmd = [
+            'ssh', f'{self.ssh_user}@{dest_host}',
+            download_cmd
+        ]
+
+        mode_str = "excluding pages-*.img" if exclude_pages else "all files"
+        logger.info(f"Downloading from S3 ({mode_str}): {s3_config.get_s3_uri()}")
+
+        try:
+            start_time = time.time()
+            result = subprocess.run(
+                ssh_cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            download_duration = time.time() - start_time
+
+            return {
+                'success': True,
+                's3_uri': s3_config.get_s3_uri(),
+                'lazy_mode': lazy_config.mode.value if lazy_config else 'none',
+                'excluded_pages': exclude_pages,
+                'download_duration': download_duration
+            }
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"S3 download failed: {e.stderr}")
+            return {
+                'success': False,
+                'error': str(e),
+                'stderr': e.stderr
+            }
+
+    def transfer_with_s3_config(self, source_host: str, dest_host: str,
+                                 checkpoint_dir: str, s3_config: S3Config,
+                                 lazy_config: LazyConfig = None) -> Dict[str, Any]:
+        """
+        Complete S3 transfer workflow: upload from source, download to dest.
+
+        Args:
+            source_host: Source host IP
+            dest_host: Destination host IP
+            checkpoint_dir: Checkpoint directory path on source
+            s3_config: S3 configuration object
+            lazy_config: LazyConfig for determining restore mode
+
+        Returns:
+            Combined transfer metrics
+        """
+        start_time = time.time()
+
+        # Step 1: Upload to S3
+        upload_result = self.upload_to_s3_with_config(source_host, checkpoint_dir, s3_config)
+        if not upload_result.get('success'):
+            return upload_result
+
+        # Step 2: Download to destination (excluding pages for lazy modes)
+        # Use the same directory structure on destination
+        dest_checkpoint_dir = checkpoint_dir
+        download_result = self.download_from_s3_with_config(
+            dest_host, dest_checkpoint_dir, s3_config, lazy_config
+        )
+        if not download_result.get('success'):
+            download_result['upload_result'] = upload_result
+            return download_result
+
+        total_duration = time.time() - start_time
+
+        return {
+            'success': True,
+            'method': 's3',
+            's3_type': s3_config.s3_type.value,
+            'lazy_mode': lazy_config.mode.value if lazy_config else 'none',
+            's3_uri': s3_config.get_s3_uri(),
+            'upload_duration': upload_result['upload_duration'],
+            'download_duration': download_result['download_duration'],
+            'total_duration': total_duration,
+            'size_mb': upload_result.get('size_mb', 0),
+            'excluded_pages': download_result.get('excluded_pages', False)
+        }

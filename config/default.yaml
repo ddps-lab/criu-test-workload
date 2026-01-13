@@ -45,9 +45,16 @@ checkpoint:
     predump_interval: 10  # seconds between iterations
     sync_after_predump: false  # sync to EBS/EFS after each pre-dump
 
-    # Lazy-pages configuration
-    lazy_pages: false
-    page_server_port: 22222
+    # Lazy mode configuration
+    # Available modes:
+    #   - none: Standard restore, all pages must be present locally
+    #   - lazy: Lazy-pages from local directory
+    #   - lazy-prefetch: Lazy with S3 async prefetch (requires S3)
+    #   - live-migration: Page-server based live migration (post-copy)
+    #   - live-migration-prefetch: S3 pre-copy + page-server post-copy (requires S3)
+    lazy_mode: "none"
+    page_server_port: 27
+    prefetch_workers: 4
 
     # Full dump configuration (only for mode: full)
     wait_before_dump: 30  # seconds to wait before dump
@@ -69,6 +76,31 @@ transfer:
 
   # EBS configuration (for method: ebs)
   # ebs_mount: "/mnt/ebs_test"
+
+# S3 Object Storage configuration (for CRIU lazy restore from S3)
+# Used when transfer.method is 's3' and lazy_mode is 'lazy-prefetch' or 'live-migration-prefetch'
+s3:
+  # S3 type: standard, cloudfront, express-one-zone
+  type: "standard"
+
+  # Upload settings (source node -> S3)
+  upload_bucket: ""  # Required: S3 bucket name
+  prefix: ""         # Optional: Object prefix (e.g., "checkpoints/exp1")
+  region: ""         # AWS region (e.g., "ap-northeast-2")
+
+  # Download settings (for CRIU object storage)
+  # download_endpoint varies by type:
+  #   - standard: s3.{region}.amazonaws.com
+  #   - cloudfront: {distribution}.cloudfront.net
+  #   - express-one-zone: s3express-{az}.{region}.amazonaws.com
+  download_endpoint: ""
+  download_bucket: ""  # Default: same as upload_bucket
+
+  # Express One Zone specific (credentials required)
+  # Recommended: use environment variables instead of hardcoding
+  access_key: "${AWS_ACCESS_KEY_ID}"
+  secret_key: "${AWS_SECRET_ACCESS_KEY}"
+  # Note: Async prefetch settings are now in checkpoint.strategy section (prefetch_workers)
 
 # Workload configuration
 workload:

@@ -28,12 +28,76 @@ import os
 import sys
 import argparse
 import logging
+import json
+import time
+import threading
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lib import CRIUExperiment, ConfigLoader
 from workloads import WorkloadFactory
+
+# Optional dirty page tracking imports
+try:
+    from tools.analyze_dirty_rate import generate_analysis_report, print_analysis_summary
+    DIRTY_ANALYSIS_AVAILABLE = True
+except ImportError:
+    DIRTY_ANALYSIS_AVAILABLE = False
+
+
+def start_remote_dirty_tracking(host: str, pid: int, interval_ms: int, output_file: str,
+                                 workload_name: str, ssh_user: str = 'ubuntu') -> tuple:
+    """
+    Start dirty page tracking on a remote host via SSH.
+
+    Returns (success, background_pid) tuple.
+    """
+    import subprocess
+
+    # Build the remote command
+    tracker_script = '/opt/criu_workload/tools/dirty_tracker.py'
+    cmd = (
+        f"ssh -o StrictHostKeyChecking=no {ssh_user}@{host} "
+        f"'sudo nohup python3 {tracker_script} "
+        f"--pid {pid} --interval {interval_ms} --workload {workload_name} "
+        f"--output {output_file} > /tmp/dirty_tracker.log 2>&1 & echo $!'"
+    )
+
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            bg_pid = int(result.stdout.strip())
+            return True, bg_pid
+        else:
+            return False, 0
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Failed to start dirty tracking: {e}")
+        return False, 0
+
+
+def stop_remote_dirty_tracking(host: str, tracker_pid: int, ssh_user: str = 'ubuntu') -> bool:
+    """Stop dirty page tracking on a remote host."""
+    import subprocess
+
+    cmd = f"ssh -o StrictHostKeyChecking=no {ssh_user}@{host} 'sudo kill -TERM {tracker_pid} 2>/dev/null || true'"
+    try:
+        subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
+        return True
+    except Exception:
+        return False
+
+
+def collect_dirty_pattern(host: str, remote_file: str, local_file: str, ssh_user: str = 'ubuntu') -> bool:
+    """Collect dirty pattern JSON from remote host."""
+    import subprocess
+
+    cmd = f"scp -o StrictHostKeyChecking=no {ssh_user}@{host}:{remote_file} {local_file}"
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, timeout=30)
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 def setup_logging(level: str = "INFO"):
@@ -241,11 +305,7 @@ def parse_args():
         default=None,
         help='Interval between pre-dumps in seconds'
     )
-    parser.add_argument(
-        '--lazy-pages',
-        action='store_true',
-        help='Enable lazy-pages mode'
-    )
+    # Note: --lazy-pages is deprecated, use --lazy-mode instead
 
     # Checkpoint trigger options (mutually exclusive)
     trigger_group = parser.add_mutually_exclusive_group()
@@ -269,6 +329,88 @@ def parse_args():
         default=None,
         choices=['rsync', 's3', 'efs', 'ebs'],
         help='Checkpoint transfer method'
+    )
+
+    # S3 Object Storage configuration
+    s3_group = parser.add_argument_group('S3 Object Storage',
+        'Options for S3-based checkpoint transfer and lazy restore')
+    s3_group.add_argument(
+        '--s3-type',
+        type=str,
+        default='standard',
+        choices=['standard', 'cloudfront', 'express-one-zone'],
+        help='S3 storage type (default: standard)'
+    )
+    # Lazy mode configuration (moved from checkpoint strategy to here for CLI convenience)
+    s3_group.add_argument(
+        '--lazy-mode',
+        type=str,
+        default='none',
+        choices=['none', 'lazy', 'lazy-prefetch', 'live-migration', 'live-migration-prefetch'],
+        help='Lazy restore mode: none (standard), lazy (local lazy-pages), lazy-prefetch (S3 async prefetch), '
+             'live-migration (page-server), live-migration-prefetch (S3 + page-server)'
+    )
+    s3_group.add_argument(
+        '--page-server-port',
+        type=int,
+        default=27,
+        help='Page server port for live migration modes (default: 27)'
+    )
+
+    # S3 Upload settings
+    s3_group.add_argument(
+        '--s3-upload-bucket',
+        type=str,
+        default=None,
+        help='S3 bucket for uploading checkpoint (required for S3 transfer)'
+    )
+    s3_group.add_argument(
+        '--s3-prefix',
+        type=str,
+        default='',
+        help='S3 object prefix (e.g., "checkpoints/exp1")'
+    )
+    s3_group.add_argument(
+        '--s3-region',
+        type=str,
+        default=None,
+        help='AWS region for S3'
+    )
+
+    # S3 Download settings (for CRIU object storage)
+    s3_group.add_argument(
+        '--s3-download-endpoint',
+        type=str,
+        default=None,
+        help='CRIU object storage endpoint URL (e.g., s3.us-east-1.amazonaws.com, d1234.cloudfront.net)'
+    )
+    s3_group.add_argument(
+        '--s3-download-bucket',
+        type=str,
+        default=None,
+        help='Bucket for CRIU download (default: same as upload bucket)'
+    )
+
+    # Express One Zone specific
+    s3_group.add_argument(
+        '--s3-access-key',
+        type=str,
+        default=None,
+        help='AWS access key (required for express-one-zone)'
+    )
+    s3_group.add_argument(
+        '--s3-secret-key',
+        type=str,
+        default=None,
+        help='AWS secret key (required for express-one-zone)'
+    )
+
+    # Async prefetch settings (used when lazy-mode is lazy-prefetch or live-migration-prefetch)
+    s3_group.add_argument(
+        '--prefetch-workers',
+        type=int,
+        default=4,
+        help='Number of prefetch worker threads for lazy-prefetch modes (default: 4)'
     )
 
     # Output
@@ -310,6 +452,32 @@ def parse_args():
         type=str,
         default=None,
         help='Experiment name (used for log directory naming, e.g., "my_exp" -> "my_exp_20240101_120000")'
+    )
+
+    # Dirty page tracking (for simulation)
+    dirty_group = parser.add_argument_group('Dirty Page Tracking',
+        'Options for tracking dirty pages during workload execution (for simulation analysis)')
+    dirty_group.add_argument(
+        '--track-dirty-pages',
+        action='store_true',
+        help='Enable dirty page tracking during workload execution using soft-dirty bits'
+    )
+    dirty_group.add_argument(
+        '--dirty-track-interval',
+        type=int,
+        default=100,
+        help='Dirty page tracking interval in milliseconds (default: 100)'
+    )
+    dirty_group.add_argument(
+        '--dirty-track-duration',
+        type=int,
+        default=None,
+        help='Dirty page tracking duration in seconds (default: until checkpoint)'
+    )
+    dirty_group.add_argument(
+        '--analyze-predump-interval',
+        action='store_true',
+        help='After tracking, analyze dirty rate to recommend optimal pre-dump interval'
     )
 
     return parser.parse_args()
@@ -394,21 +562,55 @@ def build_overrides(args) -> dict:
         overrides['checkpoint.strategy.predump_iterations'] = args.predump_iterations
     if args.predump_interval:
         overrides['checkpoint.strategy.predump_interval'] = args.predump_interval
-    if args.lazy_pages:
-        overrides['checkpoint.strategy.lazy_pages'] = True
     if args.wait_before_dump is not None:
         overrides['checkpoint.strategy.wait_before_dump'] = args.wait_before_dump
     if args.target_memory_mb is not None:
         overrides['checkpoint.strategy.target_memory_mb'] = args.target_memory_mb
 
+    # Lazy mode configuration (now unified across all transfer methods)
+    if args.lazy_mode:
+        overrides['checkpoint.strategy.lazy_mode'] = args.lazy_mode
+    if args.page_server_port:
+        overrides['checkpoint.strategy.page_server_port'] = args.page_server_port
+    if args.prefetch_workers:
+        overrides['checkpoint.strategy.prefetch_workers'] = args.prefetch_workers
+
     # Transfer overrides
     if args.transfer_method:
         overrides['transfer.method'] = args.transfer_method
+
+    # S3 configuration overrides
+    if args.s3_type:
+        overrides['s3.type'] = args.s3_type
+    if args.s3_upload_bucket:
+        overrides['s3.upload_bucket'] = args.s3_upload_bucket
+    if args.s3_prefix:
+        overrides['s3.prefix'] = args.s3_prefix
+    if args.s3_region:
+        overrides['s3.region'] = args.s3_region
+    if args.s3_download_endpoint:
+        overrides['s3.download_endpoint'] = args.s3_download_endpoint
+    if args.s3_download_bucket:
+        overrides['s3.download_bucket'] = args.s3_download_bucket
+    if args.s3_access_key:
+        overrides['s3.access_key'] = args.s3_access_key
+    if args.s3_secret_key:
+        overrides['s3.secret_key'] = args.s3_secret_key
 
     # Output overrides
     if args.output:
         overrides['experiment.metrics_file'] = args.output
         overrides['experiment.save_metrics'] = True
+
+    # Dirty page tracking overrides
+    if args.track_dirty_pages:
+        overrides['experiment.track_dirty_pages'] = True
+    if args.dirty_track_interval:
+        overrides['experiment.dirty_track_interval'] = args.dirty_track_interval
+    if args.dirty_track_duration:
+        overrides['experiment.dirty_track_duration'] = args.dirty_track_duration
+    if args.analyze_predump_interval:
+        overrides['experiment.analyze_predump_interval'] = True
 
     return overrides
 
@@ -471,9 +673,16 @@ def main():
         # Set workload on experiment
         experiment.set_workload(workload)
 
+        # Initialize dirty tracking state
+        dirty_tracker_pid = None
+        dirty_pattern_file = None
+
         # Run experiment
         logger.info("Starting experiment...")
         result = experiment.run()
+
+        # Note: Dirty tracking is handled during experiment.run() via checkpoint callback
+        # For post-experiment dirty pattern collection, we use the collect_logs flow
 
         if result['success']:
             logger.info("Experiment completed successfully!")
@@ -529,6 +738,43 @@ def main():
                 metrics_file = f"{log_result['output_dir']}/metrics.json"
                 experiment.metrics.save_to_file(metrics_file)
                 print(f"  Metrics: {metrics_file}")
+
+            # Handle dirty page tracking results if requested
+            if args.track_dirty_pages:
+                logger.info("Collecting dirty page tracking results...")
+                ssh_user = experiment.nodes_config.get('ssh_user', 'ubuntu')
+                remote_dirty_file = '/tmp/dirty_pattern.json'
+                local_output_dir = args.logs_dir if args.logs_dir else './results'
+
+                # Create output directory if needed
+                os.makedirs(local_output_dir, exist_ok=True)
+                local_dirty_file = os.path.join(local_output_dir, 'dirty_pattern.json')
+
+                # Try to collect dirty pattern from source node
+                if collect_dirty_pattern(experiment.source_host, remote_dirty_file,
+                                        local_dirty_file, ssh_user):
+                    print(f"Dirty pattern collected: {local_dirty_file}")
+
+                    # Analyze if requested
+                    if args.analyze_predump_interval and DIRTY_ANALYSIS_AVAILABLE:
+                        logger.info("Analyzing dirty rate for pre-dump interval recommendation...")
+                        try:
+                            with open(local_dirty_file, 'r') as f:
+                                dirty_data = json.load(f)
+                            report = generate_analysis_report(dirty_data)
+                            print_analysis_summary(report)
+
+                            # Save analysis report
+                            analysis_file = os.path.join(local_output_dir, 'dirty_analysis.json')
+                            with open(analysis_file, 'w') as f:
+                                json.dump(report, f, indent=2)
+                            print(f"Analysis report saved: {analysis_file}")
+                        except Exception as e:
+                            logger.warning(f"Failed to analyze dirty pattern: {e}")
+                    elif args.analyze_predump_interval and not DIRTY_ANALYSIS_AVAILABLE:
+                        logger.warning("Dirty analysis module not available. Install tools/analyze_dirty_rate.py")
+                else:
+                    logger.warning("Failed to collect dirty pattern from source node")
 
             # Cleanup processes unless --no-cleanup specified
             if not args.no_cleanup:
