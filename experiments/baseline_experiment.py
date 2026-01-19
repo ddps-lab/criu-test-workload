@@ -654,6 +654,9 @@ def main():
 
             print("=" * 60)
 
+            # Track output directory for logs and dirty pattern
+            log_result = None
+
             # Collect logs if requested
             if args.collect_logs:
                 logger.info("Collecting CRIU logs from nodes...")
@@ -681,10 +684,14 @@ def main():
                 logger.info("Collecting dirty page tracking results...")
                 ssh_user = experiment.nodes_config.get('ssh_user', 'ubuntu')
                 remote_dirty_file = '/tmp/dirty_pattern.json'
-                local_output_dir = args.logs_dir if args.logs_dir else './results'
 
-                # Create output directory if needed
-                os.makedirs(local_output_dir, exist_ok=True)
+                # Use the same output directory as logs if --collect-logs was used
+                if log_result is not None:
+                    local_output_dir = log_result['output_dir']
+                else:
+                    local_output_dir = args.logs_dir if args.logs_dir else './results'
+                    os.makedirs(local_output_dir, exist_ok=True)
+
                 local_dirty_file = os.path.join(local_output_dir, 'dirty_pattern.json')
 
                 # Try to collect dirty pattern from source node
