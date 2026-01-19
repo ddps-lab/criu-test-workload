@@ -79,7 +79,20 @@ class S3Config:
             return f"s3://{self.upload_bucket}/{self.upload_prefix}/"
         return f"s3://{self.upload_bucket}/"
 
-    def get_upload_cmd(self, local_dir: str) -> str:
+    def get_cleanup_cmd(self) -> str:
+        """
+        Generate S3 cleanup command to delete all objects in the prefix.
+
+        This should be called before uploading new checkpoint data to ensure
+        clean state (similar to rsync's local directory cleanup).
+
+        Returns:
+            AWS CLI command string to delete all objects in the prefix
+        """
+        s3_uri = self.get_s3_uri()
+        return f"aws s3 rm {s3_uri} --recursive --quiet"
+
+    def get_upload_cmd(self, local_dir: str, clean_first: bool = False) -> str:
         """
         Generate S3 upload command.
 
@@ -87,11 +100,19 @@ class S3Config:
 
         Args:
             local_dir: Local directory containing checkpoint files
+            clean_first: If True, prepend cleanup command to delete existing data
 
         Returns:
             AWS CLI command string
         """
         s3_uri = self.get_s3_uri()
+
+        if clean_first:
+            # Clean existing data before sync
+            cleanup_cmd = self.get_cleanup_cmd()
+            sync_cmd = f"aws s3 sync {local_dir}/ {s3_uri} --quiet"
+            return f"{cleanup_cmd} && {sync_cmd}"
+
         # Use sync for efficiency, recursive for all files
         return f"aws s3 sync {local_dir}/ {s3_uri} --quiet"
 

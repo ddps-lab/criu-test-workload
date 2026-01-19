@@ -15,8 +15,80 @@ from .transfer import TransferManager
 from .timing import MetricsCollector
 from .s3_config import S3Config, S3Type
 from .lazy_mode import LazyMode, LazyConfig
+from .dirty_tracker import DirtyPageTracker
 
 logger = logging.getLogger(__name__)
+
+
+class RemoteDirtyTracker:
+    """Helper class to manage dirty page tracking on a remote host via SSH."""
+
+    def __init__(self, host: str, ssh_user: str = 'ubuntu'):
+        self.host = host
+        self.ssh_user = ssh_user
+        self.tracker_pid: Optional[int] = None
+        self.output_file = '/tmp/dirty_pattern.json'
+
+    def start(self, target_pid: int, interval_ms: int = 100, workload_name: str = 'unknown') -> bool:
+        """Start dirty page tracking on remote host."""
+        import subprocess
+
+        tracker_script = '/opt/criu_workload/tools/dirty_tracker.py'
+        cmd = (
+            f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} "
+            f"'sudo nohup python3 {tracker_script} "
+            f"--pid {target_pid} --interval {interval_ms} --workload {workload_name} "
+            f"--output {self.output_file} > /tmp/dirty_tracker.log 2>&1 & echo $!'"
+        )
+
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and result.stdout.strip():
+                self.tracker_pid = int(result.stdout.strip())
+                logger.info(f"Started dirty tracking on {self.host} (tracker PID: {self.tracker_pid})")
+                return True
+            else:
+                logger.warning(f"Failed to start dirty tracking: {result.stderr}")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to start dirty tracking: {e}")
+            return False
+
+    def stop(self) -> bool:
+        """Stop dirty page tracking on remote host."""
+        if self.tracker_pid is None:
+            return True
+
+        import subprocess
+
+        cmd = f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} 'sudo kill -TERM {self.tracker_pid} 2>/dev/null || true'"
+        try:
+            subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
+            logger.info(f"Stopped dirty tracking on {self.host}")
+            # Give it time to write output
+            import time
+            time.sleep(1)
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to stop dirty tracking: {e}")
+            return False
+
+    def collect_results(self, local_file: str) -> bool:
+        """Collect dirty pattern results from remote host."""
+        import subprocess
+
+        cmd = f"scp -o StrictHostKeyChecking=no {self.ssh_user}@{self.host}:{self.output_file} {local_file}"
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, timeout=30)
+            if result.returncode == 0:
+                logger.info(f"Collected dirty pattern to {local_file}")
+                return True
+            else:
+                logger.warning(f"Failed to collect dirty pattern: {result.stderr}")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to collect dirty pattern: {e}")
+            return False
 
 
 class CRIUExperiment:
@@ -79,6 +151,12 @@ class CRIUExperiment:
         self.workload_pid: Optional[str] = None
         self.checkpoint_iteration = 0
 
+        # Dirty page tracking state
+        self._dirty_tracker: Optional[RemoteDirtyTracker] = None
+        self._dirty_tracking_enabled = self.experiment_config.get('track_dirty_pages', False)
+        self._dirty_track_interval = self.experiment_config.get('dirty_track_interval', 100)
+        logger.info(f"Dirty tracking config: enabled={self._dirty_tracking_enabled}, interval={self._dirty_track_interval}ms")
+
     def set_workload(self, workload):
         """
         Set the workload instance.
@@ -106,6 +184,13 @@ class CRIUExperiment:
             # Step 2: Start workload
             self._start_workload()
 
+            # Step 2.5: Start dirty page tracking if enabled
+            logger.info(f"Dirty tracking check: enabled={self._dirty_tracking_enabled}, pid={self.workload_pid}")
+            if self._dirty_tracking_enabled and self.workload_pid:
+                self._start_dirty_tracking()
+            else:
+                logger.info(f"Dirty tracking not started (enabled={self._dirty_tracking_enabled})")
+
             # Step 3: Run checkpoint strategy
             strategy_mode = self.checkpoint_config['strategy']['mode']
             if strategy_mode == 'predump':
@@ -114,6 +199,10 @@ class CRIUExperiment:
                 self._run_full_dump_strategy()
             else:
                 raise ValueError(f"Unknown checkpoint strategy: {strategy_mode}")
+
+            # Step 3.5: Stop dirty page tracking before transfer
+            if self._dirty_tracker is not None:
+                self._stop_dirty_tracking()
 
             # Step 4: Transfer checkpoint
             self._transfer_checkpoint()
@@ -144,6 +233,10 @@ class CRIUExperiment:
             }
 
         finally:
+            # Stop dirty tracking if still running
+            if self._dirty_tracker is not None:
+                self._stop_dirty_tracking()
+
             # Clean up SSH connections
             self.checkpoint_mgr.close_all_connections()
 
@@ -156,6 +249,38 @@ class CRIUExperiment:
         self.checkpoint_mgr.cleanup_and_prepare(self.dest_host, self.ssh_user)
 
         logger.info("Nodes prepared")
+
+    def _start_dirty_tracking(self):
+        """Start dirty page tracking on source node."""
+        if not self.workload_pid:
+            logger.warning("Cannot start dirty tracking: no workload PID")
+            return
+
+        logger.info(f"Starting dirty page tracking (interval: {self._dirty_track_interval}ms)")
+
+        self._dirty_tracker = RemoteDirtyTracker(self.source_host, self.ssh_user)
+        workload_name = self.experiment_config.get('workload_type', 'unknown')
+
+        if not self._dirty_tracker.start(
+            int(self.workload_pid),
+            self._dirty_track_interval,
+            workload_name
+        ):
+            logger.warning("Failed to start dirty tracking, continuing without it")
+            self._dirty_tracker = None
+
+    def _stop_dirty_tracking(self):
+        """Stop dirty page tracking and record results."""
+        if self._dirty_tracker is None:
+            return
+
+        logger.info("Stopping dirty page tracking...")
+        self._dirty_tracker.stop()
+
+        # Note: Results are collected later by baseline_experiment.py via collect_dirty_pattern()
+        # The tracker writes to /tmp/dirty_pattern.json on the remote host
+
+        self._dirty_tracker = None
 
     def _start_workload(self):
         """Start workload process on source node."""

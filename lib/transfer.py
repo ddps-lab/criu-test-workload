@@ -332,7 +332,7 @@ class TransferManager:
             }
 
     def upload_to_s3_with_config(self, source_host: str, checkpoint_dir: str,
-                                  s3_config: S3Config) -> Dict[str, Any]:
+                                  s3_config: S3Config, clean_first: bool = True) -> Dict[str, Any]:
         """
         Upload checkpoint to S3 using S3Config.
 
@@ -340,18 +340,20 @@ class TransferManager:
             source_host: Source host IP
             checkpoint_dir: Checkpoint directory path on source host
             s3_config: S3 configuration object
+            clean_first: If True, delete existing S3 data before upload (default: True)
 
         Returns:
             Upload metrics
         """
-        upload_cmd = s3_config.get_upload_cmd(checkpoint_dir)
+        upload_cmd = s3_config.get_upload_cmd(checkpoint_dir, clean_first=clean_first)
 
         ssh_cmd = [
             'ssh', f'{self.ssh_user}@{source_host}',
             upload_cmd
         ]
 
-        logger.info(f"Uploading to S3: {s3_config.get_s3_uri()}")
+        clean_msg = " (cleaning existing data first)" if clean_first else ""
+        logger.info(f"Uploading to S3{clean_msg}: {s3_config.get_s3_uri()}")
 
         try:
             start_time = time.time()
@@ -441,7 +443,8 @@ class TransferManager:
 
     def transfer_with_s3_config(self, source_host: str, dest_host: str,
                                  checkpoint_dir: str, s3_config: S3Config,
-                                 lazy_config: LazyConfig = None) -> Dict[str, Any]:
+                                 lazy_config: LazyConfig = None,
+                                 clean_first: bool = True) -> Dict[str, Any]:
         """
         Complete S3 transfer workflow: upload from source, download to dest.
 
@@ -451,14 +454,15 @@ class TransferManager:
             checkpoint_dir: Checkpoint directory path on source
             s3_config: S3 configuration object
             lazy_config: LazyConfig for determining restore mode
+            clean_first: If True, delete existing S3 data before upload (default: True)
 
         Returns:
             Combined transfer metrics
         """
         start_time = time.time()
 
-        # Step 1: Upload to S3
-        upload_result = self.upload_to_s3_with_config(source_host, checkpoint_dir, s3_config)
+        # Step 1: Upload to S3 (with optional cleanup of existing data)
+        upload_result = self.upload_to_s3_with_config(source_host, checkpoint_dir, s3_config, clean_first=clean_first)
         if not upload_result.get('success'):
             return upload_result
 

@@ -38,55 +38,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib import CRIUExperiment, ConfigLoader
 from workloads import WorkloadFactory
 
-# Optional dirty page tracking imports
-try:
-    from tools.analyze_dirty_rate import generate_analysis_report, print_analysis_summary
-    DIRTY_ANALYSIS_AVAILABLE = True
-except ImportError:
-    DIRTY_ANALYSIS_AVAILABLE = False
-
-
-def start_remote_dirty_tracking(host: str, pid: int, interval_ms: int, output_file: str,
-                                 workload_name: str, ssh_user: str = 'ubuntu') -> tuple:
-    """
-    Start dirty page tracking on a remote host via SSH.
-
-    Returns (success, background_pid) tuple.
-    """
-    import subprocess
-
-    # Build the remote command
-    tracker_script = '/opt/criu_workload/tools/dirty_tracker.py'
-    cmd = (
-        f"ssh -o StrictHostKeyChecking=no {ssh_user}@{host} "
-        f"'sudo nohup python3 {tracker_script} "
-        f"--pid {pid} --interval {interval_ms} --workload {workload_name} "
-        f"--output {output_file} > /tmp/dirty_tracker.log 2>&1 & echo $!'"
-    )
-
-    try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            bg_pid = int(result.stdout.strip())
-            return True, bg_pid
-        else:
-            return False, 0
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"Failed to start dirty tracking: {e}")
-        return False, 0
-
-
-def stop_remote_dirty_tracking(host: str, tracker_pid: int, ssh_user: str = 'ubuntu') -> bool:
-    """Stop dirty page tracking on a remote host."""
-    import subprocess
-
-    cmd = f"ssh -o StrictHostKeyChecking=no {ssh_user}@{host} 'sudo kill -TERM {tracker_pid} 2>/dev/null || true'"
-    try:
-        subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
-        return True
-    except Exception:
-        return False
-
 
 def collect_dirty_pattern(host: str, remote_file: str, local_file: str, ssh_user: str = 'ubuntu') -> bool:
     """Collect dirty pattern JSON from remote host."""
@@ -474,11 +425,6 @@ def parse_args():
         default=None,
         help='Dirty page tracking duration in seconds (default: until checkpoint)'
     )
-    dirty_group.add_argument(
-        '--analyze-predump-interval',
-        action='store_true',
-        help='After tracking, analyze dirty rate to recommend optimal pre-dump interval'
-    )
 
     return parser.parse_args()
 
@@ -609,8 +555,6 @@ def build_overrides(args) -> dict:
         overrides['experiment.dirty_track_interval'] = args.dirty_track_interval
     if args.dirty_track_duration:
         overrides['experiment.dirty_track_duration'] = args.dirty_track_duration
-    if args.analyze_predump_interval:
-        overrides['experiment.analyze_predump_interval'] = True
 
     return overrides
 
@@ -673,16 +617,9 @@ def main():
         # Set workload on experiment
         experiment.set_workload(workload)
 
-        # Initialize dirty tracking state
-        dirty_tracker_pid = None
-        dirty_pattern_file = None
-
-        # Run experiment
+        # Run experiment (dirty tracking is handled automatically inside run() if enabled)
         logger.info("Starting experiment...")
         result = experiment.run()
-
-        # Note: Dirty tracking is handled during experiment.run() via checkpoint callback
-        # For post-experiment dirty pattern collection, we use the collect_logs flow
 
         if result['success']:
             logger.info("Experiment completed successfully!")
@@ -754,25 +691,7 @@ def main():
                 if collect_dirty_pattern(experiment.source_host, remote_dirty_file,
                                         local_dirty_file, ssh_user):
                     print(f"Dirty pattern collected: {local_dirty_file}")
-
-                    # Analyze if requested
-                    if args.analyze_predump_interval and DIRTY_ANALYSIS_AVAILABLE:
-                        logger.info("Analyzing dirty rate for pre-dump interval recommendation...")
-                        try:
-                            with open(local_dirty_file, 'r') as f:
-                                dirty_data = json.load(f)
-                            report = generate_analysis_report(dirty_data)
-                            print_analysis_summary(report)
-
-                            # Save analysis report
-                            analysis_file = os.path.join(local_output_dir, 'dirty_analysis.json')
-                            with open(analysis_file, 'w') as f:
-                                json.dump(report, f, indent=2)
-                            print(f"Analysis report saved: {analysis_file}")
-                        except Exception as e:
-                            logger.warning(f"Failed to analyze dirty pattern: {e}")
-                    elif args.analyze_predump_interval and not DIRTY_ANALYSIS_AVAILABLE:
-                        logger.warning("Dirty analysis module not available. Install tools/analyze_dirty_rate.py")
+                    print(f"  To analyze: python3 tools/analyze_dirty_rate.py {local_dirty_file}")
                 else:
                     logger.warning("Failed to collect dirty pattern from source node")
 
