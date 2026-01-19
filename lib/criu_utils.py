@@ -21,31 +21,127 @@ logger = logging.getLogger(__name__)
 
 
 class RemoteDirtyTracker:
-    """Helper class to manage dirty page tracking on a remote host via SSH."""
+    """
+    Helper class to manage dirty page tracking on a remote host via SSH.
 
-    def __init__(self, host: str, ssh_user: str = 'ubuntu'):
+    Supports multiple tracker backends:
+    - 'c': C PAGEMAP_SCAN tracker (fastest, requires kernel 6.7+)
+    - 'go': Go soft-dirty tracker (cross-platform)
+    - 'python': Python soft-dirty tracker (fallback)
+
+    The tracker is auto-selected based on availability, preferring C > Go > Python.
+    """
+
+    # Tracker binary paths (relative to /opt/criu_workload)
+    TRACKER_PATHS = {
+        'c': 'criu_workload/tools/dirty_tracker_c/dirty_tracker',
+        'go': 'criu_workload/tools/dirty_tracker_go/dirty_tracker',
+        'python': 'tools/dirty_tracker.py',
+    }
+
+    def __init__(self, host: str, ssh_user: str = 'ubuntu', tracker_type: str = 'auto'):
+        """
+        Initialize RemoteDirtyTracker.
+
+        Args:
+            host: Remote host IP or hostname
+            ssh_user: SSH username (default: ubuntu)
+            tracker_type: 'auto', 'c', 'go', or 'python'
+        """
         self.host = host
         self.ssh_user = ssh_user
         self.tracker_pid: Optional[int] = None
         self.output_file = '/tmp/dirty_pattern.json'
+        self.tracker_type = tracker_type
+        self._selected_tracker: Optional[str] = None
 
-    def start(self, target_pid: int, interval_ms: int = 100, workload_name: str = 'unknown') -> bool:
-        """Start dirty page tracking on remote host."""
+    def _check_tracker_exists(self, tracker_type: str) -> bool:
+        """Check if a tracker binary exists on the remote host."""
         import subprocess
 
-        tracker_script = '/opt/criu_workload/tools/dirty_tracker.py'
+        base_path = '/opt/criu_workload'
+        tracker_path = f"{base_path}/{self.TRACKER_PATHS[tracker_type]}"
+
+        cmd = f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} 'test -x {tracker_path} && echo exists'"
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+            return 'exists' in result.stdout
+        except Exception:
+            return False
+
+    def _select_tracker(self) -> Optional[str]:
+        """Auto-select the best available tracker."""
+        if self.tracker_type != 'auto':
+            if self._check_tracker_exists(self.tracker_type):
+                return self.tracker_type
+            logger.warning(f"Requested tracker '{self.tracker_type}' not found, falling back to auto-select")
+
+        # Try in order of preference: C (PAGEMAP_SCAN) > Go > Python
+        for tracker in ['c', 'go', 'python']:
+            if self._check_tracker_exists(tracker):
+                logger.info(f"Selected dirty tracker: {tracker}")
+                return tracker
+
+        logger.warning("No dirty tracker found on remote host")
+        return None
+
+    def start(self, target_pid: int, interval_ms: int = 100, workload_name: str = 'unknown',
+              duration_sec: int = 3600) -> bool:
+        """
+        Start dirty page tracking on remote host.
+
+        Args:
+            target_pid: PID of the process to track
+            interval_ms: Sampling interval in milliseconds
+            workload_name: Name of the workload (for output metadata)
+            duration_sec: Maximum tracking duration in seconds (default: 1 hour)
+
+        Returns:
+            True if tracking started successfully
+        """
+        import subprocess
+
+        self._selected_tracker = self._select_tracker()
+        if self._selected_tracker is None:
+            return False
+
+        base_path = '/opt/criu_workload'
+        tracker_path = f"{base_path}/{self.TRACKER_PATHS[self._selected_tracker]}"
+
+        # Build command based on tracker type
+        if self._selected_tracker == 'c':
+            # C tracker: ./dirty_tracker -p PID -i INTERVAL -d DURATION -w WORKLOAD -o OUTPUT
+            tracker_cmd = (
+                f"sudo {tracker_path} "
+                f"-p {target_pid} -i {interval_ms} -d {duration_sec} "
+                f"-w {workload_name} -o {self.output_file}"
+            )
+        elif self._selected_tracker == 'go':
+            # Go tracker: ./dirty_tracker -pid PID -interval INTERVAL -duration DURATION -workload WORKLOAD -output OUTPUT
+            tracker_cmd = (
+                f"sudo {tracker_path} "
+                f"-pid {target_pid} -interval {interval_ms} -duration {duration_sec} "
+                f"-workload {workload_name} -output {self.output_file}"
+            )
+        else:
+            # Python tracker: python3 dirty_tracker.py --pid PID --interval INTERVAL --workload WORKLOAD --output OUTPUT
+            tracker_cmd = (
+                f"sudo python3 {tracker_path} "
+                f"--pid {target_pid} --interval {interval_ms} --workload {workload_name} "
+                f"--output {self.output_file}"
+            )
+
         cmd = (
             f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} "
-            f"'sudo nohup python3 {tracker_script} "
-            f"--pid {target_pid} --interval {interval_ms} --workload {workload_name} "
-            f"--output {self.output_file} > /tmp/dirty_tracker.log 2>&1 & echo $!'"
+            f"'nohup {tracker_cmd} > /tmp/dirty_tracker.log 2>&1 & echo $!'"
         )
 
         try:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
             if result.returncode == 0 and result.stdout.strip():
                 self.tracker_pid = int(result.stdout.strip())
-                logger.info(f"Started dirty tracking on {self.host} (tracker PID: {self.tracker_pid})")
+                logger.info(f"Started {self._selected_tracker} dirty tracking on {self.host} "
+                           f"(tracker PID: {self.tracker_pid}, interval: {interval_ms}ms)")
                 return True
             else:
                 logger.warning(f"Failed to start dirty tracking: {result.stderr}")
@@ -61,10 +157,11 @@ class RemoteDirtyTracker:
 
         import subprocess
 
+        # Send SIGTERM to allow graceful shutdown and JSON output
         cmd = f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} 'sudo kill -TERM {self.tracker_pid} 2>/dev/null || true'"
         try:
             subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
-            logger.info(f"Stopped dirty tracking on {self.host}")
+            logger.info(f"Stopped dirty tracking on {self.host} (was using {self._selected_tracker} tracker)")
             # Give it time to write output
             import time
             time.sleep(1)
@@ -89,6 +186,11 @@ class RemoteDirtyTracker:
         except Exception as e:
             logger.warning(f"Failed to collect dirty pattern: {e}")
             return False
+
+    @property
+    def selected_tracker(self) -> Optional[str]:
+        """Return the currently selected tracker type."""
+        return self._selected_tracker
 
 
 class CRIUExperiment:

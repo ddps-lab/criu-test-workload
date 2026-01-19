@@ -411,7 +411,15 @@ def parse_args():
     dirty_group.add_argument(
         '--track-dirty-pages',
         action='store_true',
-        help='Enable dirty page tracking during workload execution using soft-dirty bits'
+        help='Enable dirty page tracking during workload execution'
+    )
+    dirty_group.add_argument(
+        '--dirty-tracker',
+        type=str,
+        default='auto',
+        choices=['auto', 'c', 'go', 'python'],
+        help='Dirty page tracker backend: auto (default, prefers C > Go > Python), '
+             'c (PAGEMAP_SCAN, fastest, kernel 6.7+), go (soft-dirty), python (soft-dirty fallback)'
     )
     dirty_group.add_argument(
         '--dirty-track-interval',

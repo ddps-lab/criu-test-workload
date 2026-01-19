@@ -106,6 +106,35 @@ fi
 git clone "$REPO_URL" "$WORKLOAD_DIR"
 chown -R ubuntu:ubuntu "$WORKLOAD_DIR"
 
+# 5.5 Build dirty page trackers
+echo "[5.5/7] Building dirty page trackers..."
+
+# Install Go
+GO_VERSION="1.21.0"
+if ! command -v go &> /dev/null; then
+    echo "Installing Go ${GO_VERSION}..."
+    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz
+    tar -C /usr/local -xzf /tmp/go.tar.gz
+    rm /tmp/go.tar.gz
+    export PATH=$PATH:/usr/local/go/bin
+    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
+fi
+
+# Build Go dirty tracker
+echo "Building Go dirty tracker..."
+cd "$WORKLOAD_DIR/criu_workload/tools/dirty_tracker_go"
+/usr/local/go/bin/go build -o dirty_tracker .
+
+# Build C dirty tracker (PAGEMAP_SCAN for kernel 6.7+)
+echo "Building C dirty tracker (PAGEMAP_SCAN)..."
+cd "$WORKLOAD_DIR/criu_workload/tools/dirty_tracker_c"
+make
+
+# Verify
+echo "Dirty trackers built:"
+ls -la "$WORKLOAD_DIR/criu_workload/tools/dirty_tracker_go/dirty_tracker"
+ls -la "$WORKLOAD_DIR/criu_workload/tools/dirty_tracker_c/dirty_tracker"
+
 # 6. Configure Redis (disable system service)
 echo "[6/7] Configuring services..."
 systemctl stop redis-server || true
