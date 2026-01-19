@@ -122,18 +122,18 @@ fi
 
 # Build Go dirty tracker
 echo "Building Go dirty tracker..."
-cd "$WORKLOAD_DIR/criu_workload/tools/dirty_tracker_go"
+cd "$WORKLOAD_DIR/tools/dirty_tracker_go"
 /usr/local/go/bin/go build -o dirty_tracker .
 
 # Build C dirty tracker (PAGEMAP_SCAN for kernel 6.7+)
 echo "Building C dirty tracker (PAGEMAP_SCAN)..."
-cd "$WORKLOAD_DIR/criu_workload/tools/dirty_tracker_c"
+cd "$WORKLOAD_DIR/tools/dirty_tracker_c"
 make
 
 # Verify
 echo "Dirty trackers built:"
-ls -la "$WORKLOAD_DIR/criu_workload/tools/dirty_tracker_go/dirty_tracker"
-ls -la "$WORKLOAD_DIR/criu_workload/tools/dirty_tracker_c/dirty_tracker"
+ls -la "$WORKLOAD_DIR/tools/dirty_tracker_go/dirty_tracker"
+ls -la "$WORKLOAD_DIR/tools/dirty_tracker_c/dirty_tracker"
 
 # 6. Configure Redis (disable system service)
 echo "[6/7] Configuring services..."

@@ -34,8 +34,8 @@ class RemoteDirtyTracker:
 
     # Tracker binary paths (relative to /opt/criu_workload)
     TRACKER_PATHS = {
-        'c': 'criu_workload/tools/dirty_tracker_c/dirty_tracker',
-        'go': 'criu_workload/tools/dirty_tracker_go/dirty_tracker',
+        'c': 'tools/dirty_tracker_c/dirty_tracker',
+        'go': 'tools/dirty_tracker_go/dirty_tracker',
         'python': 'tools/dirty_tracker.py',
     }
 
