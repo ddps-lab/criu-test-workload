@@ -519,8 +519,8 @@ Examples:
 
     parser.add_argument('--pid', '-p', type=int, required=True,
                         help='Process ID to track')
-    parser.add_argument('--duration', '-d', type=float, required=True,
-                        help='Tracking duration in seconds')
+    parser.add_argument('--duration', '-d', type=float, default=None,
+                        help='Tracking duration in seconds (if not specified, runs until SIGTERM/SIGINT)')
     parser.add_argument('--interval', '-i', type=int, default=100,
                         help='Sampling interval in milliseconds (default: 100)')
     parser.add_argument('--output', '-o', type=str, default=None,
@@ -549,23 +549,39 @@ Examples:
 
     tracker = DirtyPageTracker(args.pid, args.interval, args.verbose, args.track_children)
 
-    # Handle Ctrl+C
+    # Flag for graceful shutdown
+    stop_requested = threading.Event()
+
+    # Handle Ctrl+C and SIGTERM
     def signal_handler(sig, frame):
-        print("\nInterrupted, stopping tracker...", file=sys.stderr)
-        tracker.stop()
-        sys.exit(0)
+        print("\nSignal received, stopping tracker...", file=sys.stderr)
+        stop_requested.set()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     child_mode = "with children" if args.track_children else "single process"
-    print(f"Tracking PID {args.pid} for {args.duration}s (interval: {args.interval}ms, {child_mode})...",
-          file=sys.stderr)
+    if args.duration:
+        print(f"Tracking PID {args.pid} for {args.duration}s (interval: {args.interval}ms, {child_mode})...",
+              file=sys.stderr)
+    else:
+        print(f"Tracking PID {args.pid} until signal (interval: {args.interval}ms, {child_mode})...",
+              file=sys.stderr)
 
     tracker.start()
 
     try:
-        time.sleep(args.duration)
+        if args.duration:
+            # Fixed duration mode
+            start_time = time.time()
+            while time.time() - start_time < args.duration:
+                if stop_requested.is_set():
+                    break
+                time.sleep(0.1)
+        else:
+            # Run until signal
+            while not stop_requested.is_set():
+                time.sleep(0.1)
     finally:
         tracker.stop()
 
