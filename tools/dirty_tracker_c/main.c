@@ -122,6 +122,7 @@ typedef struct {
     int pagemap_fd;
     int clear_refs_fd;
     bool use_pagemap_scan;
+    bool no_clear;  /* If true, don't clear dirty bits after scan */
 
     vma_info_t vmas[MAX_VMAS];
     int vma_count;
@@ -246,11 +247,12 @@ static bool check_pagemap_scan_support(int fd) {
     return (ret == 0 || (ret == -1 && errno != ENOTTY && errno != EINVAL));
 }
 
-static int tracker_init(tracker_t *t, int pid, int interval_ms) {
+static int tracker_init(tracker_t *t, int pid, int interval_ms, bool no_clear) {
     memset(t, 0, sizeof(*t));
 
     t->pid = pid;
     t->interval_ms = interval_ms;
+    t->no_clear = no_clear;
     t->pagemap_fd = -1;
     t->clear_refs_fd = -1;
 
@@ -325,6 +327,17 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, sample_t *sample) {
     if (!sample->pages) return -1;
     sample->page_count = 0;
 
+    /*
+     * PM_SCAN_WP_MATCHING: atomically scan and write-protect dirty pages.
+     * This clears dirty state during the scan itself, eliminating the race
+     * condition between read and clear_refs. When no_clear is set, we skip
+     * this flag so dirty bits accumulate across scans.
+     */
+    uint64_t scan_flags = 0;
+    if (!t->no_clear) {
+        scan_flags |= PM_SCAN_WP_MATCHING;
+    }
+
     /* Scan each writable VMA separately */
     for (int v = 0; v < t->vma_count; v++) {
         vma_info_t *vma = &t->vmas[v];
@@ -334,7 +347,7 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, sample_t *sample) {
 
         struct pm_scan_arg args = {
             .size = sizeof(args),
-            .flags = 0,
+            .flags = scan_flags,
             .start = vma->start,
             .end = vma->end,
             .vec = (uint64_t)t->regions,
@@ -348,8 +361,17 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, sample_t *sample) {
 
         long ret = ioctl(t->pagemap_fd, PAGEMAP_SCAN, &args);
         if (ret < 0) {
-            /* PAGEMAP_SCAN failed, skip this VMA */
-            continue;
+            if (errno == EPERM && scan_flags != 0) {
+                /* WP not supported (e.g., no userfaultfd), retry without */
+                fprintf(stderr, "PM_SCAN_WP_MATCHING not supported, falling back to clear_refs\n");
+                args.flags = 0;
+                ret = ioctl(t->pagemap_fd, PAGEMAP_SCAN, &args);
+                if (ret < 0) continue;
+                /* Mark that we need manual clear */
+                t->no_clear = false;
+            } else {
+                continue;
+            }
         }
 
         /* Process returned regions */
@@ -448,6 +470,7 @@ static int collect_sample(tracker_t *t) {
 
     int ret;
     if (t->use_pagemap_scan) {
+        /* PAGEMAP_SCAN with PM_SCAN_WP_MATCHING does atomic scan+clear */
         ret = read_dirty_pages_pagemap_scan(t, sample);
     } else {
         ret = read_dirty_pages_soft_dirty(t, sample);
@@ -458,8 +481,15 @@ static int collect_sample(tracker_t *t) {
     t->total_dirty_pages += sample->page_count;
     t->sample_count++;
 
-    /* Clear soft-dirty bits */
-    clear_soft_dirty(t);
+    /*
+     * Clear soft-dirty bits via clear_refs.
+     * - PAGEMAP_SCAN with WP_MATCHING: already cleared atomically, skip
+     * - PAGEMAP_SCAN without WP (no_clear=true): skip (accumulate mode)
+     * - soft-dirty fallback: clear unless no_clear
+     */
+    if (!t->use_pagemap_scan && !t->no_clear) {
+        clear_soft_dirty(t);
+    }
 
     return 0;
 }
@@ -479,6 +509,7 @@ static void write_json_output(tracker_t *t, const char *workload, const char *ou
             t->sample_count > 0 ? t->samples[t->sample_count - 1].timestamp_ms : 0.0);
     fprintf(f, "  \"page_size\": %d,\n", PAGE_SIZE);
     fprintf(f, "  \"pagemap_scan_used\": %s,\n", t->use_pagemap_scan ? "true" : "false");
+    fprintf(f, "  \"clear_on_scan\": %s,\n", t->no_clear ? "false" : "true");
 
     /* Samples */
     fprintf(f, "  \"samples\": [\n");
@@ -524,7 +555,13 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  -d, --duration SEC   Tracking duration in seconds (default: 10)\n");
     fprintf(stderr, "  -o, --output FILE    Output JSON file (default: stdout)\n");
     fprintf(stderr, "  -w, --workload NAME  Workload name (default: unknown)\n");
+    fprintf(stderr, "  -n, --no-clear       Don't clear dirty bits after scan (accumulate mode)\n");
     fprintf(stderr, "  -h, --help           Show this help\n");
+    fprintf(stderr, "\nClear behavior:\n");
+    fprintf(stderr, "  Default: PAGEMAP_SCAN uses PM_SCAN_WP_MATCHING for atomic scan+clear.\n");
+    fprintf(stderr, "           Soft-dirty fallback uses clear_refs after each scan.\n");
+    fprintf(stderr, "  --no-clear: Dirty bits accumulate across scans. Each sample shows\n");
+    fprintf(stderr, "              all pages dirtied since tracking started.\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -533,6 +570,7 @@ int main(int argc, char *argv[]) {
     int duration_sec = 10;
     const char *output_file = NULL;
     const char *workload = "unknown";
+    bool no_clear = false;
 
     static struct option long_options[] = {
         {"pid", required_argument, 0, 'p'},
@@ -540,18 +578,20 @@ int main(int argc, char *argv[]) {
         {"duration", required_argument, 0, 'd'},
         {"output", required_argument, 0, 'o'},
         {"workload", required_argument, 0, 'w'},
+        {"no-clear", no_argument, 0, 'n'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:i:d:o:w:h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:i:d:o:w:nh", long_options, NULL)) != -1) {
         switch (opt) {
             case 'p': pid = atoi(optarg); break;
             case 'i': interval_ms = atoi(optarg); break;
             case 'd': duration_sec = atoi(optarg); break;
             case 'o': output_file = optarg; break;
             case 'w': workload = optarg; break;
+            case 'n': no_clear = true; break;
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -573,14 +613,14 @@ int main(int argc, char *argv[]) {
 
     /* Initialize tracker */
     tracker_t tracker;
-    if (tracker_init(&tracker, pid, interval_ms) < 0) {
+    if (tracker_init(&tracker, pid, interval_ms, no_clear) < 0) {
         return 1;
     }
 
-    fprintf(stderr, "Tracking PID %d for %d seconds (interval=%dms)\n",
-            pid, duration_sec, interval_ms);
+    fprintf(stderr, "Tracking PID %d for %d seconds (interval=%dms, clear=%s)\n",
+            pid, duration_sec, interval_ms, no_clear ? "off" : "on");
 
-    /* Clear soft-dirty initially */
+    /* Clear soft-dirty initially (always clear at start for a clean baseline) */
     clear_soft_dirty(&tracker);
 
     /* Start tracking */

@@ -279,7 +279,8 @@ class DirtyPageTracker:
 
     PAGE_SIZE = 4096
 
-    def __init__(self, pid: int, interval_ms: int = 100, track_children: bool = True):
+    def __init__(self, pid: int, interval_ms: int = 100, track_children: bool = True,
+                 no_clear: bool = False):
         """
         Initialize dirty page tracker.
 
@@ -287,10 +288,12 @@ class DirtyPageTracker:
             pid: Process ID to track (root process)
             interval_ms: Sampling interval in milliseconds
             track_children: If True, automatically track child processes
+            no_clear: If True, don't clear dirty bits after scan (accumulate mode)
         """
         self.root_pid = pid
         self.interval = interval_ms / 1000.0
         self.track_children = track_children
+        self.no_clear = no_clear
         self.samples: List[DirtySample] = []
 
         # Process management
@@ -408,7 +411,8 @@ class DirtyPageTracker:
                 for pid, tracker in list(self._process_trackers.items()):
                     dirty_pages = tracker.read_dirty_pages(self._unique_dirty_addrs)
                     all_dirty_pages.extend(dirty_pages)
-                    tracker.clear_soft_dirty()
+                    if not self.no_clear:
+                        tracker.clear_soft_dirty()
 
                 delta_dirty = len(all_dirty_pages)
                 elapsed_ms = (time.time() - self._start_time) * 1000

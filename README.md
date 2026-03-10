@@ -845,3 +845,89 @@ Total Experiment Duration: 95.67s
 | `ml_training` | 딥러닝 학습 | 정적 | torch | GPU 사용 가능 |
 | `video` | 비디오 트랜스코딩 | 정적 | ffmpeg | 실제 ffmpeg 프로세스, live/file 모드 |
 | `dataproc` | ETL/배치 분석 | 초기화 후 정적 | numpy | Pandas/Spark 유사 작업 |
+
+---
+
+## Dirty Page Tracking
+
+워크로드 실행 중 dirty page를 추적하여 체크포인트 스케줄링 최적화에 활용합니다.
+
+### 기본 사용법
+
+```bash
+# dirty page tracking 활성화
+python3 run_experiment.py --workload memory --track-dirty-pages
+
+# 스캔 주기 설정 (기본 100ms)
+python3 run_experiment.py --workload memory --track-dirty-pages --dirty-track-interval 200
+
+# 트래커 백엔드 지정
+python3 run_experiment.py --workload memory --track-dirty-pages --dirty-tracker c
+
+# accumulate 모드 (스캔 후 dirty bit clear 안 함)
+python3 run_experiment.py --workload memory --track-dirty-pages --dirty-no-clear
+```
+
+### 트래커 백엔드
+
+3가지 구현체가 있으며, `auto` 모드에서 C > Go > Python 순으로 자동 선택됩니다.
+
+| 백엔드 | 방식 | 요구사항 | 위치 |
+|--------|------|----------|------|
+| `c` | `PAGEMAP_SCAN` ioctl + `PM_SCAN_WP_MATCHING` | Linux 6.7+ | `tools/dirty_tracker_c/` |
+| `go` | soft-dirty bit 스캔 | Linux 3.11+ | `tools/dirty_tracker_go/` |
+| `python` | soft-dirty bit 스캔 | Linux 3.11+ | `tools/dirty_tracker.py` |
+
+### Clear 동작
+
+| 모드 | 동작 | 용도 |
+|------|------|------|
+| 기본 (clear) | 매 스캔 후 dirty bit 초기화 | **delta 측정** - 이전 스캔 이후 변경된 페이지만 수집 |
+| `--dirty-no-clear` | dirty bit 누적 | **누적 측정** - 추적 시작 이후 변경된 모든 페이지 수집 |
+
+**C 트래커의 atomic scan+clear**: `PM_SCAN_WP_MATCHING` 플래그를 사용하여 스캔과 write-protect 설정을 atomically 수행합니다. soft-dirty fallback의 read → clear_refs 사이 race condition이 없습니다.
+
+### 독립 실행
+
+```bash
+# C tracker
+sudo ./tools/dirty_tracker_c/dirty_tracker -p PID -i 100 -d 30 -o output.json
+sudo ./tools/dirty_tracker_c/dirty_tracker -p PID -i 100 -d 30 -o output.json -n  # no-clear
+
+# Go tracker
+sudo ./tools/dirty_tracker_go/dirty_tracker -pid PID -interval 100 -duration 30 -output output.json
+sudo ./tools/dirty_tracker_go/dirty_tracker -pid PID -interval 100 -duration 30 -output output.json -no-clear
+
+# Python tracker
+sudo python3 tools/dirty_tracker.py --pid PID --interval 100 --duration 30 --output output.json
+sudo python3 tools/dirty_tracker.py --pid PID --interval 100 --duration 30 --output output.json --no-clear
+```
+
+### 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `--track-dirty-pages` | false | dirty page tracking 활성화 |
+| `--dirty-tracker` | auto | 트래커 백엔드 (auto/c/go/python) |
+| `--dirty-track-interval` | 100 | 스캔 주기 (ms) |
+| `--dirty-track-duration` | - | 추적 시간 (초, 기본: 체크포인트까지) |
+| `--dirty-no-clear` | false | 스캔 후 dirty bit clear 안 함 (accumulate 모드) |
+
+### 출력 형식
+
+JSON 출력에 `clear_on_scan` 필드가 포함되어 clear 모드를 확인할 수 있습니다:
+
+```json
+{
+  "workload": "memory",
+  "root_pid": 12345,
+  "clear_on_scan": true,
+  "pagemap_scan_used": true,
+  "samples": [...],
+  "summary": {
+    "total_unique_pages": 12450,
+    "avg_dirty_rate_per_sec": 1000.5,
+    "peak_dirty_rate": 5000.0
+  }
+}
+```

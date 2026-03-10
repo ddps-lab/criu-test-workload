@@ -241,11 +241,12 @@ class DirtyPageTracker:
     PAGE_SIZE = 4096
 
     def __init__(self, pid: int, interval_ms: int = 100, verbose: bool = False,
-                 track_children: bool = True):
+                 track_children: bool = True, no_clear: bool = False):
         self.root_pid = pid
         self.interval = interval_ms / 1000.0
         self.verbose = verbose
         self.track_children = track_children
+        self.no_clear = no_clear
         self.samples: List[DirtySample] = []
         self._process_trackers: Dict[int, SingleProcessTracker] = {}
         self._known_pids: Set[int] = set()
@@ -354,7 +355,8 @@ class DirtyPageTracker:
                 for pid, tracker in list(self._process_trackers.items()):
                     dirty_pages = tracker.read_dirty_pages(self._unique_dirty_addrs)
                     all_dirty_pages.extend(dirty_pages)
-                    tracker.clear_soft_dirty()
+                    if not self.no_clear:
+                        tracker.clear_soft_dirty()
 
                 delta_dirty = len(all_dirty_pages)
                 elapsed_ms = (time.time() - self._start_time) * 1000
@@ -482,6 +484,7 @@ class DirtyPageTracker:
             'track_children': self.track_children,
             'tracking_duration_ms': duration_ms,
             'page_size': self.PAGE_SIZE,
+            'clear_on_scan': not self.no_clear,
             'samples': samples_data,
             'summary': {
                 'total_unique_pages': len(self._unique_dirty_addrs),
@@ -534,6 +537,9 @@ Examples:
     parser.add_argument('--no-track-children', dest='track_children',
                         action='store_false', default=True,
                         help='Disable tracking of child processes (default: enabled)')
+    parser.add_argument('--no-clear', dest='no_clear',
+                        action='store_true', default=False,
+                        help='Don\'t clear dirty bits after each scan (accumulate mode)')
 
     args = parser.parse_args()
 
@@ -547,7 +553,7 @@ Examples:
         print(f"Error: Process {args.pid} not found", file=sys.stderr)
         sys.exit(1)
 
-    tracker = DirtyPageTracker(args.pid, args.interval, args.verbose, args.track_children)
+    tracker = DirtyPageTracker(args.pid, args.interval, args.verbose, args.track_children, args.no_clear)
 
     # Flag for graceful shutdown
     stop_requested = threading.Event()
@@ -561,11 +567,12 @@ Examples:
     signal.signal(signal.SIGTERM, signal_handler)
 
     child_mode = "with children" if args.track_children else "single process"
+    clear_mode = "no-clear (accumulate)" if args.no_clear else "clear after scan"
     if args.duration:
-        print(f"Tracking PID {args.pid} for {args.duration}s (interval: {args.interval}ms, {child_mode})...",
+        print(f"Tracking PID {args.pid} for {args.duration}s (interval: {args.interval}ms, {child_mode}, {clear_mode})...",
               file=sys.stderr)
     else:
-        print(f"Tracking PID {args.pid} until signal (interval: {args.interval}ms, {child_mode})...",
+        print(f"Tracking PID {args.pid} until signal (interval: {args.interval}ms, {child_mode}, {clear_mode})...",
               file=sys.stderr)
 
     tracker.start()

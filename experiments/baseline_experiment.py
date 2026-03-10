@@ -433,6 +433,12 @@ def parse_args():
         default=None,
         help='Dirty page tracking duration in seconds (default: until checkpoint)'
     )
+    dirty_group.add_argument(
+        '--dirty-no-clear',
+        action='store_true',
+        help='Don\'t clear dirty bits after each scan (accumulate mode). '
+             'Each sample shows all pages dirtied since tracking started.'
+    )
 
     return parser.parse_args()
 
@@ -563,6 +569,8 @@ def build_overrides(args) -> dict:
         overrides['experiment.dirty_track_interval'] = args.dirty_track_interval
     if args.dirty_track_duration:
         overrides['experiment.dirty_track_duration'] = args.dirty_track_duration
+    if args.dirty_no_clear:
+        overrides['experiment.dirty_no_clear'] = True
 
     return overrides
 

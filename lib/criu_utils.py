@@ -39,7 +39,8 @@ class RemoteDirtyTracker:
         'python': 'tools/dirty_tracker.py',
     }
 
-    def __init__(self, host: str, ssh_user: str = 'ubuntu', tracker_type: str = 'auto'):
+    def __init__(self, host: str, ssh_user: str = 'ubuntu', tracker_type: str = 'auto',
+                 no_clear: bool = False):
         """
         Initialize RemoteDirtyTracker.
 
@@ -47,12 +48,14 @@ class RemoteDirtyTracker:
             host: Remote host IP or hostname
             ssh_user: SSH username (default: ubuntu)
             tracker_type: 'auto', 'c', 'go', or 'python'
+            no_clear: If True, don't clear dirty bits after scan (accumulate mode)
         """
         self.host = host
         self.ssh_user = ssh_user
         self.tracker_pid: Optional[int] = None
         self.output_file = '/tmp/dirty_pattern.json'
         self.tracker_type = tracker_type
+        self.no_clear = no_clear
         self._selected_tracker: Optional[str] = None
 
     def _check_tracker_exists(self, tracker_type: str) -> bool:
@@ -109,26 +112,27 @@ class RemoteDirtyTracker:
         tracker_path = f"{base_path}/{self.TRACKER_PATHS[self._selected_tracker]}"
 
         # Build command based on tracker type
+        no_clear_flag_c = " -n" if self.no_clear else ""
+        no_clear_flag_go = " -no-clear" if self.no_clear else ""
+        no_clear_flag_py = " --no-clear" if self.no_clear else ""
+
         if self._selected_tracker == 'c':
-            # C tracker: ./dirty_tracker -p PID -i INTERVAL -d DURATION -w WORKLOAD -o OUTPUT
             tracker_cmd = (
                 f"sudo {tracker_path} "
                 f"-p {target_pid} -i {interval_ms} -d {duration_sec} "
-                f"-w {workload_name} -o {self.output_file}"
+                f"-w {workload_name} -o {self.output_file}{no_clear_flag_c}"
             )
         elif self._selected_tracker == 'go':
-            # Go tracker: ./dirty_tracker -pid PID -interval INTERVAL -duration DURATION -workload WORKLOAD -output OUTPUT
             tracker_cmd = (
                 f"sudo {tracker_path} "
                 f"-pid {target_pid} -interval {interval_ms} -duration {duration_sec} "
-                f"-workload {workload_name} -output {self.output_file}"
+                f"-workload {workload_name} -output {self.output_file}{no_clear_flag_go}"
             )
         else:
-            # Python tracker: python3 dirty_tracker.py --pid PID --interval INTERVAL --workload WORKLOAD --output OUTPUT
             tracker_cmd = (
                 f"sudo python3 {tracker_path} "
                 f"--pid {target_pid} --interval {interval_ms} --workload {workload_name} "
-                f"--output {self.output_file}"
+                f"--output {self.output_file}{no_clear_flag_py}"
             )
 
         cmd = (
@@ -257,7 +261,9 @@ class CRIUExperiment:
         self._dirty_tracker: Optional[RemoteDirtyTracker] = None
         self._dirty_tracking_enabled = self.experiment_config.get('track_dirty_pages', False)
         self._dirty_track_interval = self.experiment_config.get('dirty_track_interval', 100)
-        logger.info(f"Dirty tracking config: enabled={self._dirty_tracking_enabled}, interval={self._dirty_track_interval}ms")
+        self._dirty_no_clear = self.experiment_config.get('dirty_no_clear', False)
+        logger.info(f"Dirty tracking config: enabled={self._dirty_tracking_enabled}, "
+                     f"interval={self._dirty_track_interval}ms, no_clear={self._dirty_no_clear}")
 
     def set_workload(self, workload):
         """
@@ -360,7 +366,9 @@ class CRIUExperiment:
 
         logger.info(f"Starting dirty page tracking (interval: {self._dirty_track_interval}ms)")
 
-        self._dirty_tracker = RemoteDirtyTracker(self.source_host, self.ssh_user)
+        self._dirty_tracker = RemoteDirtyTracker(
+            self.source_host, self.ssh_user, no_clear=self._dirty_no_clear
+        )
         workload_name = self.experiment_config.get('workload_type', 'unknown')
 
         if not self._dirty_tracker.start(

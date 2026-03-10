@@ -116,6 +116,7 @@ type DirtyPattern struct {
 	TrackChildren      bool             `json:"track_children"`
 	TrackingDurationMs float64          `json:"tracking_duration_ms"`
 	PageSize           int              `json:"page_size"`
+	ClearOnScan        bool             `json:"clear_on_scan"`
 	Samples            []DirtySample    `json:"samples"`
 	Summary            Summary          `json:"summary"`
 	DirtyRateTimeline  []DirtyRateEntry `json:"dirty_rate_timeline"`
@@ -309,6 +310,7 @@ type DirtyPageTracker struct {
 	intervalMs    int
 	trackChildren bool
 	workloadName  string
+	noClear       bool
 
 	mu              sync.Mutex
 	trackers        map[int]*ProcessTracker
@@ -322,12 +324,13 @@ type DirtyPageTracker struct {
 	startTime time.Time
 }
 
-func NewDirtyPageTracker(rootPid, intervalMs int, trackChildren bool, workloadName string) *DirtyPageTracker {
+func NewDirtyPageTracker(rootPid, intervalMs int, trackChildren bool, workloadName string, noClear bool) *DirtyPageTracker {
 	return &DirtyPageTracker{
 		rootPid:       rootPid,
 		intervalMs:    intervalMs,
 		trackChildren: trackChildren,
 		workloadName:  workloadName,
+		noClear:       noClear,
 		trackers:      make(map[int]*ProcessTracker),
 		knownPids:     make(map[int]struct{}),
 		deadPids:      make(map[int]struct{}),
@@ -462,7 +465,9 @@ func (dt *DirtyPageTracker) Run(duration time.Duration) {
 			if err == nil {
 				allDirtyPages = append(allDirtyPages, dirtyPages...)
 			}
-			tracker.ClearSoftDirty()
+			if !dt.noClear {
+				tracker.ClearSoftDirty()
+			}
 		}
 
 		elapsedMs := float64(time.Since(dt.startTime).Microseconds()) / 1000.0
@@ -620,6 +625,7 @@ func (dt *DirtyPageTracker) GetDirtyPattern() DirtyPattern {
 		TrackChildren:      dt.trackChildren,
 		TrackingDurationMs: durationMs,
 		PageSize:           PageSize,
+		ClearOnScan:        !dt.noClear,
 		Samples:            dt.samples,
 		Summary:            summary,
 		DirtyRateTimeline:  timeline,
@@ -633,6 +639,7 @@ func main() {
 	outputFile := flag.String("output", "", "Output JSON file (default: stdout)")
 	workload := flag.String("workload", "unknown", "Workload name")
 	trackChildren := flag.Bool("children", true, "Track child processes")
+	noClear := flag.Bool("no-clear", false, "Don't clear dirty bits after scan (accumulate mode)")
 
 	flag.Parse()
 
@@ -642,7 +649,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	tracker := NewDirtyPageTracker(*pid, *intervalMs, *trackChildren, *workload)
+	tracker := NewDirtyPageTracker(*pid, *intervalMs, *trackChildren, *workload, *noClear)
 
 	// Handle Ctrl+C
 	sigCh := make(chan os.Signal, 1)
@@ -653,8 +660,12 @@ func main() {
 		tracker.Stop()
 	}()
 
-	fmt.Fprintf(os.Stderr, "Tracking PID %d for %.1f seconds (interval=%dms, children=%v)\n",
-		*pid, *durationSec, *intervalMs, *trackChildren)
+	clearStr := "on"
+	if *noClear {
+		clearStr = "off (accumulate)"
+	}
+	fmt.Fprintf(os.Stderr, "Tracking PID %d for %.1f seconds (interval=%dms, children=%v, clear=%s)\n",
+		*pid, *durationSec, *intervalMs, *trackChildren, clearStr)
 
 	tracker.Run(time.Duration(*durationSec * float64(time.Second)))
 
