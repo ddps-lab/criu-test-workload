@@ -36,6 +36,13 @@ from lib.dirty_tracker import DirtyPageTracker
 
 logger = logging.getLogger(__name__)
 
+# External tracker binary paths (relative to criu_workload/)
+TRACKER_PATHS = {
+    'c': 'tools/dirty_tracker_c/dirty_tracker',
+    'go': 'tools/dirty_tracker_go/dirty_tracker',
+    'python': 'tools/dirty_tracker.py',
+}
+
 # Workload standalone script mapping
 STANDALONE_SCRIPTS = {
     'memory': 'workloads/memory_standalone.py',
@@ -59,7 +66,7 @@ def build_workload_cmd(args, working_dir: str) -> list:
     if not os.path.exists(script_path):
         raise FileNotFoundError(f"Standalone script not found: {script_path}")
 
-    cmd = [sys.executable, script_path, '--working-dir', working_dir]
+    cmd = [sys.executable, script_path, '--working_dir', working_dir]
 
     # Common args
     if args.workload_duration:
@@ -138,6 +145,59 @@ def wait_for_checkpoint_ready(working_dir: str, timeout: float = 120) -> int:
     raise TimeoutError(f"Workload did not become ready within {timeout}s")
 
 
+def select_tracker(tracker_type: str) -> str:
+    """Select the best available tracker. Returns 'c', 'go', or 'python'."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    if tracker_type != 'auto':
+        path = os.path.join(base_dir, TRACKER_PATHS[tracker_type])
+        if tracker_type == 'python' or os.path.exists(path):
+            return tracker_type
+        logger.warning(f"Requested tracker '{tracker_type}' not found at {path}, falling back to auto")
+
+    # Auto-select: C > Go > Python
+    for t in ['c', 'go']:
+        path = os.path.join(base_dir, TRACKER_PATHS[t])
+        if os.path.exists(path):
+            return t
+    return 'python'
+
+
+def start_external_tracker(tracker_type: str, pid: int, interval_ms: int,
+                           duration_sec: int, workload_name: str,
+                           output_file: str, no_clear: bool) -> subprocess.Popen:
+    """Start C or Go tracker as a subprocess. Requires sudo for pagemap access."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tracker_path = os.path.join(base_dir, TRACKER_PATHS[tracker_type])
+
+    if tracker_type == 'c':
+        cmd = ['sudo', tracker_path,
+               '-p', str(pid), '-i', str(interval_ms), '-d', str(duration_sec),
+               '-w', workload_name, '-o', output_file]
+        if no_clear:
+            cmd.append('-n')
+    elif tracker_type == 'go':
+        cmd = ['sudo', tracker_path,
+               '-pid', str(pid), '-interval', str(interval_ms),
+               '-duration', str(duration_sec), '-workload', workload_name,
+               '-output', output_file]
+        if no_clear:
+            cmd.append('-no-clear')
+    elif tracker_type == 'python':
+        cmd = ['sudo', sys.executable, tracker_path,
+               '--pid', str(pid), '--interval', str(interval_ms),
+               '--duration', str(duration_sec), '--workload', workload_name,
+               '--output', output_file]
+        if no_clear:
+            cmd.append('--no-clear')
+    else:
+        raise ValueError(f"Unknown tracker type: {tracker_type}")
+
+    logger.info(f"Starting {tracker_type} tracker: {' '.join(cmd)}")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return proc
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Run a workload locally and track dirty pages (no migration)',
@@ -162,13 +222,18 @@ def parse_args():
 
     # Dirty tracker options
     dirty_group = parser.add_argument_group('Dirty Page Tracker')
+    dirty_group.add_argument('--dirty-tracker', type=str, default='auto',
+                             choices=['auto', 'c', 'go', 'python'],
+                             help='Tracker backend: auto (C>Go>Python), c (PAGEMAP_SCAN, fastest), '
+                                  'go (soft-dirty), python (soft-dirty, in-process). '
+                                  'C and Go trackers require sudo. (default: auto)')
     dirty_group.add_argument('--dirty-track-interval', type=int, default=100,
                              help='Tracking interval in milliseconds (default: 100)')
     dirty_group.add_argument('--dirty-no-clear', action='store_true', default=False,
                              help='Don\'t clear dirty bits after each scan (accumulate mode)')
     dirty_group.add_argument('--no-track-children', dest='track_children',
                              action='store_false', default=True,
-                             help='Disable tracking of child processes')
+                             help='Disable tracking of child processes (python tracker only)')
 
     # Workload-specific options
     wl_group = parser.add_argument_group('Workload Options')
@@ -279,19 +344,39 @@ def main():
 
         logger.info(f"Workload ready (PID: {workload_pid})")
 
-        # Start dirty page tracker
-        tracker = DirtyPageTracker(
-            pid=workload_pid,
-            interval_ms=args.dirty_track_interval,
-            track_children=args.track_children,
-            no_clear=args.dirty_no_clear
-        )
-
+        # Select tracker backend
+        selected_tracker = select_tracker(args.dirty_tracker)
         clear_mode = "no-clear (accumulate)" if args.dirty_no_clear else "clear after scan"
-        logger.info(f"Starting dirty page tracking for {args.duration}s "
+        logger.info(f"Using {selected_tracker} tracker for {args.duration}s "
                      f"(interval={args.dirty_track_interval}ms, {clear_mode})")
 
-        tracker.start()
+        # Determine output file path for external trackers
+        if args.output:
+            tracker_output = args.output
+        else:
+            tracker_output = os.path.join(working_dir, 'dirty_result.json')
+
+        use_external = (selected_tracker in ('c', 'go') or
+                        (selected_tracker == 'python' and os.geteuid() != 0))
+        tracker_proc = None
+
+        if use_external:
+            # External tracker (C/Go/Python standalone) via subprocess
+            os.makedirs(os.path.dirname(os.path.abspath(tracker_output)), exist_ok=True)
+            tracker_proc = start_external_tracker(
+                selected_tracker, workload_pid,
+                args.dirty_track_interval, args.duration,
+                args.workload, tracker_output, args.dirty_no_clear
+            )
+        else:
+            # In-process Python tracker
+            tracker = DirtyPageTracker(
+                pid=workload_pid,
+                interval_ms=args.dirty_track_interval,
+                track_children=args.track_children,
+                no_clear=args.dirty_no_clear
+            )
+            tracker.start()
 
         # Wait for tracking duration (interruptible)
         stop_event = threading.Event()
@@ -311,32 +396,58 @@ def main():
             if workload_proc.poll() is not None:
                 logger.warning("Workload exited prematurely")
                 break
+            # Check if external tracker exited
+            if tracker_proc and tracker_proc.poll() is not None:
+                break
             time.sleep(0.5)
 
-        # Stop tracker
-        tracker.stop()
+        # Stop tracker and collect results
+        if use_external:
+            if tracker_proc and tracker_proc.poll() is None:
+                tracker_proc.send_signal(signal.SIGTERM)
+                try:
+                    tracker_proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    tracker_proc.kill()
+
+            stderr_output = tracker_proc.stderr.read().decode() if tracker_proc else ''
+            if stderr_output:
+                logger.info(f"Tracker output:\n{stderr_output.strip()}")
+
+            # Read results from output file
+            try:
+                with open(tracker_output, 'r') as f:
+                    output_data = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                logger.error(f"Failed to read tracker output: {e}")
+                return 1
+        else:
+            tracker.stop()
+
+            # Export results
+            pattern = tracker.get_dirty_pattern(args.workload)
+            from dataclasses import asdict
+            output_data = asdict(pattern)
+
+            # Convert addresses to hex
+            for sample in output_data.get('samples', []):
+                for page in sample.get('dirty_pages', []):
+                    if isinstance(page.get('addr'), int):
+                        page['addr'] = hex(page['addr'])
+
         logger.info("Dirty page tracking stopped")
 
-        # Export results
-        pattern = tracker.get_dirty_pattern(args.workload)
-
-        # Convert to dict
-        from dataclasses import asdict
-        output_data = asdict(pattern)
-
-        # Convert addresses to hex
-        for sample in output_data.get('samples', []):
-            for page in sample.get('dirty_pages', []):
-                if isinstance(page.get('addr'), int):
-                    page['addr'] = hex(page['addr'])
-
-        # Output
-        if args.output:
-            os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-            with open(args.output, 'w') as f:
-                json.dump(output_data, f, indent=2)
-            logger.info(f"Results written to {args.output}")
-        else:
+        # Write output (if in-process tracker or stdout requested)
+        if not use_external:
+            if args.output:
+                os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+                with open(args.output, 'w') as f:
+                    json.dump(output_data, f, indent=2)
+                logger.info(f"Results written to {args.output}")
+            else:
+                print(json.dumps(output_data, indent=2))
+        elif not args.output:
+            # External tracker wrote to temp file, dump to stdout
             print(json.dumps(output_data, indent=2))
 
         # Run analysis
@@ -351,15 +462,12 @@ def main():
             except Exception as e:
                 logger.warning(f"Analysis failed: {e}")
         elif args.analyze and not args.output:
-            # JSON went to stdout, run analysis on stderr
             try:
                 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 sys.path.insert(0, os.path.join(base_dir, 'tools'))
                 from analyze_dirty_rate import generate_analysis_report, print_analysis_summary
 
                 report = generate_analysis_report(output_data)
-                # Redirect print to stderr
-                import io
                 old_stdout = sys.stdout
                 sys.stdout = sys.stderr
                 print_analysis_summary(report)
@@ -372,7 +480,9 @@ def main():
         if summary:
             print("\n=== Dirty Page Tracking Summary ===", file=sys.stderr)
             print(f"  Workload: {args.workload}", file=sys.stderr)
+            print(f"  Tracker: {selected_tracker}", file=sys.stderr)
             print(f"  Root PID: {workload_pid}", file=sys.stderr)
+            print(f"  PAGEMAP_SCAN: {output_data.get('pagemap_scan_used', False)}", file=sys.stderr)
             print(f"  Duration: {output_data.get('tracking_duration_ms', 0):.1f} ms", file=sys.stderr)
             print(f"  Samples: {summary.get('sample_count', 0)}", file=sys.stderr)
             print(f"  Unique dirty pages: {summary.get('total_unique_pages', 0)}", file=sys.stderr)
@@ -398,6 +508,14 @@ def main():
                 tracker.stop()
             except Exception:
                 pass
+
+        # Stop external tracker if still running
+        if tracker_proc and tracker_proc.poll() is None:
+            tracker_proc.send_signal(signal.SIGTERM)
+            try:
+                tracker_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                tracker_proc.kill()
 
         # Stop workload: remove checkpoint_flag and wait
         try:
