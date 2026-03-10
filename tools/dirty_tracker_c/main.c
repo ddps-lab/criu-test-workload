@@ -143,6 +143,10 @@ typedef struct {
     /* VMA type counters (indexed by vma_type_t) */
     int vma_type_counts[7];
     int vma_type_sizes[7];
+
+    /* WP mode state */
+    bool wp_initialized;   /* set after initial WP probe/setup */
+    bool wp_active;        /* true if WP mode is actually working */
 } tracker_t;
 
 static volatile sig_atomic_t stop_flag = 0;
@@ -332,15 +336,84 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, sample_t *sample) {
     sample->page_count = 0;
 
     /*
-     * PM_SCAN_WP_MATCHING: atomically scan and write-protect dirty pages.
-     * This clears dirty state during the scan itself, eliminating the race
-     * condition between read and clear_refs. When no_clear is set, we skip
-     * this flag so dirty bits accumulate across scans.
+     * Determine scan mode:
+     * - wp_active: Use PM_SCAN_WP_MATCHING for atomic scan+clear (PAGE_IS_WRITTEN)
+     * - no_clear && !wp_active: Accumulate soft-dirty bits (no clear)
+     * - !no_clear && !wp_active: Use soft-dirty + clear_refs
+     *
+     * wp_active is set during init if userfaultfd-wp is supported.
+     * If WP probe fails, we fall back to soft-dirty permanently.
      */
-    uint64_t scan_flags = 0;
-    if (!t->no_clear) {
-        scan_flags |= PM_SCAN_WP_MATCHING;
+    bool use_wp = t->wp_active;
+    uint64_t scan_flags = use_wp ? PM_SCAN_WP_MATCHING : 0;
+
+    /* Initial WP setup: probe and enable WP if supported */
+    if (!t->wp_initialized && !t->no_clear) {
+        /*
+         * First check if any pages support userfaultfd write-protection.
+         * PM_SCAN_WP_MATCHING silently skips pages without WP support,
+         * so we must explicitly check PAGE_IS_WPALLOWED.
+         */
+        struct pm_scan_arg check_args = {
+            .size = sizeof(check_args),
+            .flags = 0,  /* No WP, just check */
+            .start = 0,
+            .end = 0x7fffffffffffULL,
+            .vec = (uint64_t)t->regions,
+            .vec_len = 1,
+            .max_pages = 1,
+            .category_mask = PAGE_IS_WPALLOWED,  /* Require WP support */
+            .category_anyof_mask = PAGE_IS_PRESENT | PAGE_IS_SWAPPED,
+            .return_mask = PAGE_IS_WPALLOWED,
+        };
+        long ret = ioctl(t->pagemap_fd, PAGEMAP_SCAN, &check_args);
+        if (ret <= 0) {
+            fprintf(stderr, "No pages support userfaultfd-wp, falling back to soft-dirty + clear_refs\n");
+            use_wp = false;
+            scan_flags = 0;
+            t->no_clear = false;
+            t->wp_initialized = true;
+        } else {
+            /* WP is supported, write-protect all present pages for baseline */
+            use_wp = true;
+            scan_flags = PM_SCAN_WP_MATCHING;
+            for (int v = 0; v < t->vma_count; v++) {
+                vma_info_t *vma = &t->vmas[v];
+                if (!strchr(vma->perms, 'w')) continue;
+
+                struct pm_scan_arg wp_args = {
+                    .size = sizeof(wp_args),
+                    .flags = PM_SCAN_WP_MATCHING,
+                    .start = vma->start,
+                    .end = vma->end,
+                    .vec = (uint64_t)t->regions,
+                    .vec_len = MAX_REGIONS,
+                    .max_pages = 0,
+                    .category_inverted = PAGE_IS_PFNZERO | PAGE_IS_FILE,
+                    .category_mask = PAGE_IS_PFNZERO | PAGE_IS_FILE,
+                    .category_anyof_mask = PAGE_IS_PRESENT | PAGE_IS_SWAPPED,
+                    .return_mask = 0,
+                };
+
+                ret = ioctl(t->pagemap_fd, PAGEMAP_SCAN, &wp_args);
+                if (ret < 0 && errno == EPERM) {
+                    fprintf(stderr, "PM_SCAN_WP_MATCHING not supported, falling back to soft-dirty\n");
+                    use_wp = false;
+                    scan_flags = 0;
+                    break;
+                }
+            }
+            t->wp_initialized = true;
+            if (use_wp) {
+                t->wp_active = true;
+                /* First interval: return empty sample since we just set up WP baseline */
+                return 0;
+            }
+        }
     }
+
+    /* Determine dirty flag based on mode */
+    uint64_t dirty_flag = use_wp ? PAGE_IS_WRITTEN : PAGE_IS_SOFT_DIRTY;
 
     /* Scan each writable VMA separately */
     for (int v = 0; v < t->vma_count; v++) {
@@ -349,6 +422,10 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, sample_t *sample) {
         /* Skip non-writable VMAs */
         if (!strchr(vma->perms, 'w')) continue;
 
+        /*
+         * For WP mode: require PAGE_IS_WRITTEN (pages written since last WP).
+         * For soft-dirty mode: match any present/swapped page, filter by soft-dirty after.
+         */
         struct pm_scan_arg args = {
             .size = sizeof(args),
             .flags = scan_flags,
@@ -358,17 +435,23 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, sample_t *sample) {
             .vec_len = MAX_REGIONS,
             .max_pages = 0,
             .category_inverted = PAGE_IS_PFNZERO | PAGE_IS_FILE,
-            .category_mask = PAGE_IS_PFNZERO | PAGE_IS_FILE,
+            .category_mask = PAGE_IS_PFNZERO | PAGE_IS_FILE | (use_wp ? PAGE_IS_WRITTEN : 0),
             .category_anyof_mask = PAGE_IS_PRESENT | PAGE_IS_SWAPPED,
-            .return_mask = PAGE_IS_PRESENT | PAGE_IS_SWAPPED | PAGE_IS_SOFT_DIRTY,
+            .return_mask = PAGE_IS_PRESENT | PAGE_IS_SWAPPED | dirty_flag,
         };
 
         long ret = ioctl(t->pagemap_fd, PAGEMAP_SCAN, &args);
         if (ret < 0) {
-            if (errno == EPERM && scan_flags != 0) {
-                /* WP not supported (e.g., no userfaultfd), retry without */
+            if (errno == EPERM && use_wp) {
+                /* WP not supported, retry without */
                 fprintf(stderr, "PM_SCAN_WP_MATCHING not supported, falling back to clear_refs\n");
                 args.flags = 0;
+                dirty_flag = PAGE_IS_SOFT_DIRTY;
+                args.category_mask = PAGE_IS_PFNZERO | PAGE_IS_FILE;
+                args.category_anyof_mask = PAGE_IS_PRESENT | PAGE_IS_SWAPPED;
+                args.return_mask = PAGE_IS_PRESENT | PAGE_IS_SWAPPED | PAGE_IS_SOFT_DIRTY;
+                scan_flags = 0;
+                use_wp = false;
                 ret = ioctl(t->pagemap_fd, PAGEMAP_SCAN, &args);
                 if (ret < 0) continue;
                 /* Mark that we need manual clear */
@@ -378,9 +461,10 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, sample_t *sample) {
             }
         }
 
-        /* Process returned regions */
+        /* Process returned regions - in WP mode all returned pages are dirty */
         for (long i = 0; i < ret; i++) {
-            if (!(t->regions[i].categories & PAGE_IS_SOFT_DIRTY)) continue;
+            /* In soft-dirty mode, filter by soft-dirty flag */
+            if (!use_wp && !(t->regions[i].categories & PAGE_IS_SOFT_DIRTY)) continue;
 
             for (uint64_t addr = t->regions[i].start;
                  addr < t->regions[i].end;
@@ -490,12 +574,12 @@ static int collect_sample(tracker_t *t) {
     t->sample_count++;
 
     /*
-     * Clear soft-dirty bits via clear_refs.
-     * - PAGEMAP_SCAN with WP_MATCHING: already cleared atomically, skip
-     * - PAGEMAP_SCAN without WP (no_clear=true): skip (accumulate mode)
-     * - soft-dirty fallback: clear unless no_clear
+     * Clear soft-dirty bits via clear_refs when needed:
+     * - WP active: cleared atomically by PM_SCAN_WP_MATCHING, skip
+     * - WP fell back to soft-dirty: need manual clear_refs
+     * - no_clear mode: skip (accumulate dirty bits)
      */
-    if (!t->use_pagemap_scan && !t->no_clear) {
+    if (!t->no_clear && !t->wp_active) {
         clear_soft_dirty(t);
     }
 
