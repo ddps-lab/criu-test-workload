@@ -173,7 +173,7 @@ def parse_args():
         '--duration',
         type=int,
         default=None,
-        help='Duration in seconds for video (default: 300)'
+        help='Duration in seconds for workload execution (all workloads support this)'
     )
     parser.add_argument(
         '--video-mode',

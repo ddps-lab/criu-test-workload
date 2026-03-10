@@ -39,6 +39,9 @@ aws-lab/IaC/variables.tf
 id_rsa
 id_ed25519
 
+# Documentation (local only)
+docs/
+
 # OS
 .DS_Store
 Thumbs.db

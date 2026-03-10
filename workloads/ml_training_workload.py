@@ -75,19 +75,18 @@ def generate_synthetic_data(config, batch_size):
     return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 
-def run_ml_training_workload(model_size, batch_size, epochs, learning_rate, working_dir, dataset_size=None):
+def run_ml_training_workload(model_size, batch_size, epochs, learning_rate, duration, working_dir, dataset_size=None):
     if not HAS_TORCH:
         print("[MLTrain] ERROR: PyTorch not installed")
         sys.exit(1)
 
     device = torch.device('cpu')
     print(f"[MLTrain] Starting ML training workload")
-    print(f"[MLTrain] Config: model_size={model_size}, batch_size={batch_size}")
+    print(f"[MLTrain] Config: model_size={model_size}, batch_size={batch_size}, duration={duration}s")
 
     config = get_model_config(model_size)
     if dataset_size is not None:
         config['dataset_size'] = dataset_size
-        print(f"[MLTrain] Dataset size overridden to: {dataset_size}")
     model = SimpleNN(config['input_size'], config['hidden_sizes'], config['output_size']).to(device)
     num_params = sum(p.numel() for p in model.parameters())
     print(f"[MLTrain] Model parameters: {num_params:,}")
@@ -100,12 +99,30 @@ def run_ml_training_workload(model_size, batch_size, epochs, learning_rate, work
 
     epoch = 0
     total_batches = 0
+    training_start_time = time.time()
+    loss_history = []
+    best_loss = float('inf')
 
     while True:
         if check_restore_complete(working_dir):
-            print(f"[MLTrain] Restore detected")
-            print(f"[MLTrain] Epochs completed: {epoch}, Batches: {total_batches}")
+            training_duration = time.time() - training_start_time
+            print(f"[MLTrain] Restore detected - checkpoint_flag removed")
+            print(f"[MLTrain] === STATE SUMMARY (lost on restart) ===")
+            print(f"[MLTrain]   Epochs completed: {epoch}")
+            print(f"[MLTrain]   Total batches: {total_batches}")
+            print(f"[MLTrain]   Training time: {training_duration:.2f}s")
+            if loss_history:
+                print(f"[MLTrain]   Final loss: {loss_history[-1]:.4f}")
+                print(f"[MLTrain]   Best loss: {best_loss:.4f}")
+            print(f"[MLTrain]   Model parameters: {num_params:,} (ALL learned weights lost on restart)")
+            print(f"[MLTrain]   Optimizer states: Adam momentum/variance (ALL lost)")
+            print(f"[MLTrain] ==========================================")
             sys.exit(0)
+
+        elapsed = time.time() - training_start_time
+        if duration > 0 and elapsed >= duration:
+            time.sleep(1)
+            continue
 
         if epochs > 0 and epoch >= epochs:
             time.sleep(1)
@@ -128,7 +145,12 @@ def run_ml_training_workload(model_size, batch_size, epochs, learning_rate, work
             batch_count += 1
             total_batches += 1
 
-        print(f"[MLTrain] Epoch {epoch}: loss={epoch_loss/batch_count:.4f}, time={time.time()-epoch_start:.2f}s")
+        avg_loss = epoch_loss / batch_count
+        loss_history.append(avg_loss)
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+        elapsed = time.time() - training_start_time
+        print(f"[MLTrain] Epoch {epoch}: loss={avg_loss:.4f}, best={best_loss:.4f}, time={time.time()-epoch_start:.2f}s, elapsed={elapsed:.0f}s")
 
 
 def main():
@@ -137,11 +159,12 @@ def main():
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--epochs', type=int, default=0)
     parser.add_argument('--learning-rate', type=float, default=0.001)
+    parser.add_argument('--duration', type=int, default=0)
     parser.add_argument('--working_dir', type=str, default='.')
     parser.add_argument('--dataset-size', type=int, default=None)
 
     args = parser.parse_args()
-    run_ml_training_workload(args.model_size, args.batch_size, args.epochs, args.learning_rate, args.working_dir, args.dataset_size)
+    run_ml_training_workload(args.model_size, args.batch_size, args.epochs, args.learning_rate, args.duration, args.working_dir, args.dataset_size)
 
 
 if __name__ == '__main__':
@@ -168,6 +191,7 @@ class MLTrainingWorkload(BaseWorkload):
         self.batch_size = config.get('batch_size', 64)
         self.epochs = config.get('epochs', 0)
         self.learning_rate = config.get('learning_rate', 0.001)
+        self.duration = config.get('duration', 0)
         self.dataset_size = config.get('dataset_size', None)
 
     def get_standalone_script_name(self) -> str:
@@ -182,6 +206,7 @@ class MLTrainingWorkload(BaseWorkload):
         cmd += f" --batch-size {self.batch_size}"
         cmd += f" --epochs {self.epochs}"
         cmd += f" --learning-rate {self.learning_rate}"
+        cmd += f" --duration {self.duration}"
         cmd += f" --working_dir {self.working_dir}"
         if self.dataset_size is not None:
             cmd += f" --dataset-size {self.dataset_size}"

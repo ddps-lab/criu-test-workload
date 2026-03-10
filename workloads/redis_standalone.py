@@ -126,10 +126,126 @@ def check_restore_complete(working_dir: str) -> bool:
     return not os.path.exists(flag_path)
 
 
+def run_continuous_operations(client, num_keys, value_size, duration, working_dir):
+    """
+    Run continuous mixed read/write operations on Redis.
+
+    Memory is bounded:
+    - extra keys: circular buffer up to num_keys (overwrites oldest)
+    - sorted set: capped at 10,000 members (evicts lowest scores)
+    - transaction log: trimmed to last 50,000 entries
+    - hash fields: capped at 1,000 fields (natural modulo)
+
+    Despite bounded memory, the STATE is continuously evolving:
+    values keep changing, sorted set rankings shift, tx log rolls forward.
+    Restarting loses the current snapshot of all this live state.
+    """
+    start_time = time.time()
+    ops_count = 0
+    extra_key_cursor = 0       # circular cursor for extra keys
+    extra_keys_written = 0     # total extra keys ever written
+    max_extra_keys = num_keys  # cap: same as initial key count
+    tx_log_entries = 0
+    sorted_set_members = 0
+    max_sorted_set = 10000
+    max_tx_log = 50000
+    updates_to_existing = 0
+    last_report_time = start_time
+
+    while True:
+        if check_restore_complete(working_dir):
+            return {
+                'restored': True,
+                'ops_count': ops_count,
+                'extra_keys_written': extra_keys_written,
+                'extra_keys_live': min(extra_keys_written, max_extra_keys),
+                'tx_log_entries': tx_log_entries,
+                'sorted_set_members': sorted_set_members,
+                'updates_to_existing': updates_to_existing,
+                'elapsed': time.time() - start_time,
+            }
+
+        elapsed = time.time() - start_time
+        if duration > 0 and elapsed >= duration:
+            if check_restore_complete(working_dir):
+                return {
+                    'restored': True,
+                    'ops_count': ops_count,
+                    'extra_keys_written': extra_keys_written,
+                    'extra_keys_live': min(extra_keys_written, max_extra_keys),
+                    'tx_log_entries': tx_log_entries,
+                    'sorted_set_members': sorted_set_members,
+                    'updates_to_existing': updates_to_existing,
+                    'elapsed': elapsed,
+                }
+            time.sleep(1)
+            continue
+
+        op_type = random.choice(['write_new', 'update_existing', 'sorted_set', 'hash_update', 'tx_log', 'read'])
+
+        try:
+            if op_type == 'write_new':
+                # Circular buffer: overwrite oldest extra key when cap reached
+                key = f"extra:{extra_key_cursor:08d}"
+                value = generate_value(value_size, ops_count)
+                client.set(key, value)
+                extra_key_cursor = (extra_key_cursor + 1) % max_extra_keys
+                extra_keys_written += 1
+            elif op_type == 'update_existing':
+                idx = random.randint(0, num_keys - 1)
+                key = f"key:{idx:08d}"
+                value = generate_value(value_size, idx + ops_count)
+                client.set(key, value)
+                updates_to_existing += 1
+            elif op_type == 'sorted_set':
+                member = f"member:{ops_count % max_sorted_set}"
+                score = random.random() * 1000
+                client.zadd('leaderboard', {member: score})
+                sorted_set_members += 1
+                # Trim to cap (keep top scores)
+                if sorted_set_members % 1000 == 0:
+                    client.zremrangebyrank('leaderboard', 0, -(max_sorted_set + 1))
+            elif op_type == 'hash_update':
+                field = f"field:{ops_count % 1000}"
+                client.hset('stats_hash', field, str(random.random()))
+            elif op_type == 'tx_log':
+                entry = f"{time.time():.6f}:op_{ops_count}:data_{random.randint(0,9999)}"
+                client.rpush('transaction_log', entry)
+                tx_log_entries += 1
+                # Trim to keep last N entries
+                if tx_log_entries % 5000 == 0:
+                    client.ltrim('transaction_log', -max_tx_log, -1)
+            elif op_type == 'read':
+                idx = random.randint(0, num_keys - 1)
+                client.get(f"key:{idx:08d}")
+        except Exception as e:
+            print(f"[Redis] Operation error: {e}")
+
+        ops_count += 1
+
+        current_time = time.time()
+        if current_time - last_report_time >= 5.0:
+            try:
+                info = client.info('memory')
+                mem_mb = info.get('used_memory', 0) / (1024 * 1024)
+                total_keys = client.dbsize()
+            except Exception:
+                mem_mb = 0
+                total_keys = 0
+            print(f"[Redis] Ops: {ops_count}, Keys: {total_keys}, "
+                  f"ExtraWrites: {extra_keys_written}, Updates: {updates_to_existing}, "
+                  f"TxLog: {tx_log_entries}, Memory: {mem_mb:.1f}MB, "
+                  f"Elapsed: {current_time - start_time:.0f}s")
+            last_report_time = current_time
+
+        time.sleep(0.01)
+
+
 def run_redis_workload(
     redis_port: int = 6379,
     num_keys: int = 100000,
     value_size: int = 1024,
+    duration: int = 0,
     working_dir: str = '.'
 ):
     """
@@ -139,6 +255,7 @@ def run_redis_workload(
         redis_port: Redis server port
         num_keys: Number of keys to populate
         value_size: Size of each value in bytes
+        duration: Duration for continuous operations (0 = populate only)
         working_dir: Working directory for signal files
     """
     if not HAS_REDIS:
@@ -146,7 +263,8 @@ def run_redis_workload(
         sys.exit(1)
 
     print(f"[Redis] Starting Redis workload")
-    print(f"[Redis] Config: port={redis_port}, keys={num_keys}, value_size={value_size}B")
+    duration_str = f"{duration}s" if duration > 0 else "populate only"
+    print(f"[Redis] Config: port={redis_port}, keys={num_keys}, value_size={value_size}B, duration={duration_str}")
     print(f"[Redis] Working directory: {working_dir}")
 
     # Start Redis server
@@ -210,40 +328,44 @@ def run_redis_workload(
     print(f"[Redis] ===================================")
     print(f"[Redis]")
 
-    # Wait for checkpoint/restore cycle
+    # Continuous operations phase
+    print(f"[Redis] Starting continuous operations (duration={duration_str})...")
     try:
-        while True:
-            if check_restore_complete(working_dir):
-                print(f"[Redis] Restore detected - checkpoint_flag removed")
+        result = run_continuous_operations(client, num_keys, value_size, duration, working_dir)
 
-                # Verify data integrity
-                print(f"[Redis] Verifying data integrity...")
+        if result['restored']:
+            print(f"[Redis] Restore detected - checkpoint_flag removed")
 
-                # Reconnect to Redis (connection may have been broken during migration)
-                try:
-                    client = redis.Redis(host='localhost', port=redis_port)
-                    client.ping()
-                except:
-                    print(f"[Redis] Waiting for Redis to be available...")
-                    if not wait_for_redis('localhost', redis_port, timeout=30):
-                        print(f"[Redis] ERROR: Cannot connect to Redis after restore")
-                        break
-                    client = redis.Redis(host='localhost', port=redis_port)
+            # Reconnect
+            try:
+                client = redis.Redis(host='localhost', port=redis_port)
+                client.ping()
+            except Exception:
+                print(f"[Redis] Waiting for Redis to be available...")
+                if not wait_for_redis('localhost', redis_port, timeout=30):
+                    print(f"[Redis] ERROR: Cannot connect to Redis after restore")
+                    return
+                client = redis.Redis(host='localhost', port=redis_port)
 
-                current_checksum = compute_checksum(client, num_keys)
+            try:
+                total_keys = client.dbsize()
+                info = client.info('memory')
+                mem_mb = info.get('used_memory', 0) / (1024 * 1024)
+            except Exception:
+                total_keys = 0
+                mem_mb = 0
 
-                if current_checksum == initial_checksum:
-                    print(f"[Redis] Data integrity verified - checksums match!")
-                else:
-                    print(f"[Redis] WARNING: Data integrity check failed!")
-                    print(f"[Redis]   Expected: {initial_checksum[:16]}...")
-                    print(f"[Redis]   Got: {current_checksum[:16]}...")
-
-                print(f"[Redis] Keys after restore: {client.dbsize()}")
-                print("[Redis] Workload complete")
-                break
-
-            time.sleep(1)
+            print(f"[Redis] === STATE SUMMARY (lost on restart) ===")
+            print(f"[Redis]   Total operations: {result['ops_count']}")
+            print(f"[Redis]   Extra key writes: {result['extra_keys_written']} (live: {result['extra_keys_live']})")
+            print(f"[Redis]   Updates to existing keys: {result['updates_to_existing']}")
+            print(f"[Redis]   Transaction log entries: {result['tx_log_entries']}")
+            print(f"[Redis]   Sorted set operations: {result['sorted_set_members']}")
+            print(f"[Redis]   Current keys in DB: {total_keys}")
+            print(f"[Redis]   Redis memory: {mem_mb:.1f} MB")
+            print(f"[Redis]   Elapsed time: {result['elapsed']:.1f}s")
+            print(f"[Redis]   ALL live data state LOST on restart (values, rankings, tx log)")
+            print(f"[Redis] ==========================================")
 
     except KeyboardInterrupt:
         print(f"[Redis] Interrupted")
@@ -253,10 +375,13 @@ def run_redis_workload(
         print(f"[Redis] Shutting down Redis server...")
         try:
             client.shutdown(nosave=True)
-        except:
+        except Exception:
             pass
         redis_process.terminate()
-        redis_process.wait(timeout=5)
+        try:
+            redis_process.wait(timeout=5)
+        except Exception:
+            redis_process.kill()
 
     sys.exit(0)
 
@@ -284,6 +409,12 @@ def main():
         help='Size of each value in bytes (default: 1024)'
     )
     parser.add_argument(
+        '--duration',
+        type=int,
+        default=0,
+        help='Duration in seconds for continuous operations (0 = populate only)'
+    )
+    parser.add_argument(
         '--working_dir',
         type=str,
         default='.',
@@ -296,6 +427,7 @@ def main():
         redis_port=args.redis_port,
         num_keys=args.num_keys,
         value_size=args.value_size,
+        duration=args.duration,
         working_dir=args.working_dir
     )
 

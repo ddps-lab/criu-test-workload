@@ -115,6 +115,7 @@ def run_ml_training_workload(
     batch_size: int = 64,
     epochs: int = 0,  # 0 = infinite
     learning_rate: float = 0.001,
+    duration: int = 0,  # 0 = infinite (use epochs limit)
     working_dir: str = '.',
     dataset_size: int = None  # Override dataset size
 ):
@@ -126,6 +127,7 @@ def run_ml_training_workload(
         batch_size: Training batch size
         epochs: Number of epochs (0 for infinite)
         learning_rate: Optimizer learning rate
+        duration: Duration in seconds (0 for infinite, use epochs as limit)
         working_dir: Working directory for signal files
         dataset_size: Override default dataset size (None = use model default)
     """
@@ -137,7 +139,8 @@ def run_ml_training_workload(
     device = torch.device('cpu')
 
     print(f"[MLTrain] Starting ML training workload")
-    print(f"[MLTrain] Config: model_size={model_size}, batch_size={batch_size}, epochs={epochs or 'infinite'}")
+    duration_str = f"{duration}s" if duration > 0 else "infinite"
+    print(f"[MLTrain] Config: model_size={model_size}, batch_size={batch_size}, epochs={epochs or 'infinite'}, duration={duration_str}")
     print(f"[MLTrain] Device: {device}")
     print(f"[MLTrain] Working directory: {working_dir}")
 
@@ -178,18 +181,31 @@ def run_ml_training_workload(
     epoch = 0
     total_batches = 0
     training_start_time = time.time()
+    loss_history = []
+    best_loss = float('inf')
 
     while True:
         # Check if restore completed
         if check_restore_complete(working_dir):
-            print(f"[MLTrain] Restore detected - checkpoint_flag removed")
             training_duration = time.time() - training_start_time
-            print(f"[MLTrain] Training summary:")
+            print(f"[MLTrain] Restore detected - checkpoint_flag removed")
+            print(f"[MLTrain] === STATE SUMMARY (lost on restart) ===")
             print(f"[MLTrain]   Epochs completed: {epoch}")
             print(f"[MLTrain]   Total batches: {total_batches}")
             print(f"[MLTrain]   Training time: {training_duration:.2f}s")
-            print("[MLTrain] Workload complete, exiting")
+            print(f"[MLTrain]   Final loss: {loss_history[-1]:.4f}" if loss_history else f"[MLTrain]   Final loss: N/A")
+            print(f"[MLTrain]   Best loss: {best_loss:.4f}" if best_loss < float('inf') else f"[MLTrain]   Best loss: N/A")
+            print(f"[MLTrain]   Model parameters: {num_params:,} (ALL learned weights lost on restart)")
+            print(f"[MLTrain]   Optimizer states: Adam momentum/variance for each param (ALL lost)")
+            print(f"[MLTrain]   Loss history: {len(loss_history)} epochs of convergence data (ALL lost)")
+            print(f"[MLTrain] ==========================================")
             sys.exit(0)
+
+        # Duration check
+        elapsed = time.time() - training_start_time
+        if duration > 0 and elapsed >= duration:
+            time.sleep(1)
+            continue
 
         # Check epoch limit
         if epochs > 0 and epoch >= epochs:
@@ -217,8 +233,12 @@ def run_ml_training_workload(
 
         epoch_duration = time.time() - epoch_start_time
         avg_loss = epoch_loss / batch_count
+        loss_history.append(avg_loss)
+        if avg_loss < best_loss:
+            best_loss = avg_loss
 
-        print(f"[MLTrain] Epoch {epoch}: loss={avg_loss:.4f}, time={epoch_duration:.2f}s, batches={batch_count}")
+        elapsed = time.time() - training_start_time
+        print(f"[MLTrain] Epoch {epoch}: loss={avg_loss:.4f}, best={best_loss:.4f}, time={epoch_duration:.2f}s, elapsed={elapsed:.0f}s")
 
 
 def main():
@@ -251,6 +271,12 @@ def main():
         help='Learning rate (default: 0.001)'
     )
     parser.add_argument(
+        '--duration',
+        type=int,
+        default=0,
+        help='Duration in seconds (0 for infinite, use --epochs as limit)'
+    )
+    parser.add_argument(
         '--working_dir',
         type=str,
         default='.',
@@ -270,6 +296,7 @@ def main():
         batch_size=args.batch_size,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
+        duration=args.duration,
         working_dir=args.working_dir,
         dataset_size=args.dataset_size
     )

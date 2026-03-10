@@ -88,15 +88,79 @@ def check_restore_complete(working_dir: str) -> bool:
     return not os.path.exists(flag_path)
 
 
-def run_redis_workload(redis_port, num_keys, value_size, working_dir):
+def run_continuous_ops(client, num_keys, value_size, duration, working_dir):
+    start_time = time.time()
+    ops_count = 0
+    extra_cursor = 0
+    extra_written = 0
+    max_extra = num_keys
+    tx_log_entries = 0
+    sorted_set_members = 0
+    max_sorted = 10000
+    max_txlog = 50000
+    updates = 0
+    last_report_time = start_time
+
+    def make_result():
+        return {'restored': True, 'ops_count': ops_count, 'extra_written': extra_written,
+                'extra_live': min(extra_written, max_extra), 'tx_log_entries': tx_log_entries,
+                'sorted_set_members': sorted_set_members, 'updates': updates,
+                'elapsed': time.time() - start_time}
+
+    while True:
+        if check_restore_complete(working_dir):
+            return make_result()
+
+        elapsed = time.time() - start_time
+        if duration > 0 and elapsed >= duration:
+            if check_restore_complete(working_dir):
+                return make_result()
+            time.sleep(1)
+            continue
+
+        op_type = random.choice(['write_new', 'update_existing', 'sorted_set', 'hash_update', 'tx_log', 'read'])
+        try:
+            if op_type == 'write_new':
+                client.set(f"extra:{extra_cursor:08d}", generate_value(value_size, ops_count))
+                extra_cursor = (extra_cursor + 1) % max_extra
+                extra_written += 1
+            elif op_type == 'update_existing':
+                idx = random.randint(0, num_keys - 1)
+                client.set(f"key:{idx:08d}", generate_value(value_size, idx + ops_count))
+                updates += 1
+            elif op_type == 'sorted_set':
+                client.zadd('leaderboard', {f"member:{ops_count % max_sorted}": random.random() * 1000})
+                sorted_set_members += 1
+                if sorted_set_members % 1000 == 0:
+                    client.zremrangebyrank('leaderboard', 0, -(max_sorted + 1))
+            elif op_type == 'hash_update':
+                client.hset('stats_hash', f"field:{ops_count % 1000}", str(random.random()))
+            elif op_type == 'tx_log':
+                client.rpush('transaction_log', f"{time.time():.6f}:op_{ops_count}")
+                tx_log_entries += 1
+                if tx_log_entries % 5000 == 0:
+                    client.ltrim('transaction_log', -max_txlog, -1)
+            elif op_type == 'read':
+                client.get(f"key:{random.randint(0, num_keys-1):08d}")
+        except Exception:
+            pass
+        ops_count += 1
+
+        current_time = time.time()
+        if current_time - last_report_time >= 5.0:
+            print(f"[Redis] Ops: {ops_count}, ExtraWrites: {extra_written}, Updates: {updates}, Elapsed: {current_time - start_time:.0f}s")
+            last_report_time = current_time
+        time.sleep(0.01)
+
+
+def run_redis_workload(redis_port, num_keys, value_size, duration, working_dir):
     if not HAS_REDIS:
         print("[Redis] ERROR: redis-py not installed")
         sys.exit(1)
 
-    print(f"[Redis] Starting Redis workload")
+    print(f"[Redis] Starting Redis workload (duration={duration}s)")
     redis_process = start_redis_server(redis_port, working_dir)
     redis_pid = redis_process.pid
-    print(f"[Redis] Redis server PID: {redis_pid}")
 
     if not wait_for_redis('localhost', redis_port):
         print("[Redis] ERROR: Redis failed to start")
@@ -109,47 +173,44 @@ def run_redis_workload(redis_port, num_keys, value_size, working_dir):
     print(f"[Redis] Populating {num_keys} keys...")
     pipeline = client.pipeline()
     for i in range(num_keys):
-        key = f"key:{i:08d}"
-        value = generate_value(value_size, i)
-        pipeline.set(key, value)
+        pipeline.set(f"key:{i:08d}", generate_value(value_size, i))
         if (i + 1) % 1000 == 0:
             pipeline.execute()
             pipeline = client.pipeline()
     pipeline.execute()
 
-    initial_checksum = compute_checksum(client, num_keys)
     info = client.info('memory')
     print(f"[Redis] Memory: {info.get('used_memory', 0) / (1024*1024):.2f} MB")
 
-    create_ready_signal(working_dir, redis_pid)
+    wrapper_pid = os.getpid()
+    create_ready_signal(working_dir, wrapper_pid)
 
     try:
-        while True:
-            if check_restore_complete(working_dir):
-                print(f"[Redis] Restore detected")
-                try:
-                    client = redis.Redis(host='localhost', port=redis_port)
-                    client.ping()
-                except:
-                    if not wait_for_redis('localhost', redis_port, timeout=30):
-                        print(f"[Redis] ERROR: Cannot connect after restore")
-                        break
-                    client = redis.Redis(host='localhost', port=redis_port)
-
-                current_checksum = compute_checksum(client, num_keys)
-                if current_checksum == initial_checksum:
-                    print(f"[Redis] Data integrity verified!")
-                else:
-                    print(f"[Redis] WARNING: Data integrity check failed!")
-                break
-            time.sleep(1)
+        result = run_continuous_ops(client, num_keys, value_size, duration, working_dir)
+        if result['restored']:
+            print(f"[Redis] Restore detected")
+            try:
+                client = redis.Redis(host='localhost', port=redis_port)
+                client.ping()
+            except Exception:
+                if not wait_for_redis('localhost', redis_port, timeout=30):
+                    print(f"[Redis] ERROR: Cannot connect after restore")
+                    return
+                client = redis.Redis(host='localhost', port=redis_port)
+            print(f"[Redis] === STATE SUMMARY ===")
+            print(f"[Redis]   Ops: {result['ops_count']}, ExtraWrites: {result['extra_written']}, Updates: {result['updates']}")
+            print(f"[Redis]   ALL live data state LOST on restart")
+            print(f"[Redis] =========================")
     finally:
         try:
             client.shutdown(nosave=True)
-        except:
+        except Exception:
             pass
         redis_process.terminate()
-        redis_process.wait(timeout=5)
+        try:
+            redis_process.wait(timeout=5)
+        except Exception:
+            redis_process.kill()
 
     sys.exit(0)
 
@@ -159,9 +220,10 @@ def main():
     parser.add_argument('--redis-port', type=int, default=6379)
     parser.add_argument('--num-keys', type=int, default=100000)
     parser.add_argument('--value-size', type=int, default=1024)
+    parser.add_argument('--duration', type=int, default=0)
     parser.add_argument('--working_dir', type=str, default='.')
     args = parser.parse_args()
-    run_redis_workload(args.redis_port, args.num_keys, args.value_size, args.working_dir)
+    run_redis_workload(args.redis_port, args.num_keys, args.value_size, args.duration, args.working_dir)
 
 
 if __name__ == '__main__':
@@ -186,6 +248,7 @@ class RedisWorkload(BaseWorkload):
         self.redis_port = config.get('redis_port', 6379)
         self.num_keys = config.get('num_keys', 100000)
         self.value_size = config.get('value_size', 1024)
+        self.duration = config.get('duration', 0)
 
     def get_standalone_script_name(self) -> str:
         return 'redis_standalone.py'
@@ -198,6 +261,7 @@ class RedisWorkload(BaseWorkload):
         cmd += f" --redis-port {self.redis_port}"
         cmd += f" --num-keys {self.num_keys}"
         cmd += f" --value-size {self.value_size}"
+        cmd += f" --duration {self.duration}"
         cmd += f" --working_dir {self.working_dir}"
         return cmd
 

@@ -201,11 +201,44 @@ def count_segments(output_dir: str) -> int:
     return count
 
 
+def cleanup_old_segments(output_dir: str, max_segments: int = 30) -> int:
+    """Delete oldest segments to keep disk usage bounded.
+
+    Keeps only the most recent max_segments files.
+    Returns number of segments deleted.
+    """
+    segments = []
+    for f in os.listdir(output_dir):
+        if f.startswith('segment_') and f.endswith('.ts'):
+            path = os.path.join(output_dir, f)
+            segments.append((os.path.getmtime(path), path))
+    segments.sort()
+    deleted = 0
+    while len(segments) > max_segments:
+        _, path = segments.pop(0)
+        try:
+            os.remove(path)
+            deleted += 1
+        except OSError:
+            pass
+    return deleted
+
+
+def get_total_segment_size_mb(output_dir: str) -> float:
+    """Get total size of all segment files in MB."""
+    total = 0
+    for f in os.listdir(output_dir):
+        if f.startswith('segment_') and f.endswith('.ts'):
+            total += os.path.getsize(os.path.join(output_dir, f))
+    return total / (1024 * 1024)
+
+
 def run_video_workload(
     resolution: str = '1920x1080',
     fps: int = 30,
     duration: int = 300,
     mode: str = 'file',  # 'file' or 'live'
+    max_segments: int = 30,
     working_dir: str = '.'
 ):
     """
@@ -234,8 +267,15 @@ def run_video_workload(
     # Start ffmpeg
     if mode == 'live':
         ffmpeg_process, output_path = start_ffmpeg_live_transcode(resolution, fps, output_dir)
+        print(f"[Video] Live mode: segment rotation enabled (max {max_segments} segments)")
     else:
-        ffmpeg_process, output_path = start_ffmpeg_transcode(resolution, fps, duration, output_dir)
+        # Cap FFmpeg source duration to limit output file size
+        # At 5Mbps, 600s = ~375MB which is reasonable
+        max_encode_duration = 600
+        encode_duration = min(duration, max_encode_duration) if duration > 0 else max_encode_duration
+        if duration > encode_duration:
+            print(f"[Video] File mode: encoding {encode_duration}s of video (wrapper runs {duration}s)")
+        ffmpeg_process, output_path = start_ffmpeg_transcode(resolution, fps, encode_duration, output_dir)
 
     ffmpeg_pid = ffmpeg_process.pid
     print(f"[Video] FFmpeg started with PID: {ffmpeg_pid}")
@@ -273,22 +313,23 @@ def run_video_workload(
                 # Give ffmpeg a moment after restore
                 time.sleep(2)
 
-                # Check output status
+                elapsed = time.time() - start_time
+                print(f"[Video] === STATE SUMMARY (lost on restart) ===")
                 if mode == 'live':
                     segments = count_segments(output_dir)
-                    print(f"[Video] Segments created: {segments}")
+                    print(f"[Video]   Segments transcoded: {segments}")
+                    print(f"[Video]   ALL encoded segments lost on restart")
                 else:
                     stats = get_output_stats(output_path)
                     if stats.get('exists'):
-                        print(f"[Video] Output file: {stats['size_mb']:.2f} MB")
+                        print(f"[Video]   Output file: {stats['size_mb']:.2f} MB")
                         if 'duration' in stats:
-                            print(f"[Video] Duration: {stats['duration']}s")
-                    else:
-                        print(f"[Video] Output file not yet created")
-
-                elapsed = time.time() - start_time
-                print(f"[Video] Total processing time: {elapsed:.1f}s")
-                print("[Video] Workload complete")
+                            print(f"[Video]   Encoded duration: {stats['duration']}s")
+                        pct = min(100, (elapsed / duration) * 100) if duration > 0 else 0
+                        print(f"[Video]   Progress: {pct:.0f}%")
+                    print(f"[Video]   ALL encoder state and partial output LOST on restart")
+                print(f"[Video]   Total processing time: {elapsed:.1f}s")
+                print(f"[Video] ==========================================")
                 break
 
             # Check if ffmpeg is still running
@@ -302,18 +343,34 @@ def run_video_workload(
                 time.sleep(1)
                 continue
 
+            # In live mode, stop ffmpeg when duration reached
+            if mode == 'live' and duration > 0:
+                elapsed_check = time.time() - start_time
+                if elapsed_check >= duration and ffmpeg_process.poll() is None:
+                    print(f"[Video] Duration reached, stopping live transcode...")
+                    try:
+                        os.killpg(os.getpgid(ffmpeg_pid), signal.SIGTERM)
+                    except Exception:
+                        pass
+
             # Progress report every 5 seconds
             current_time = time.time()
             if current_time - last_report_time >= 5.0:
                 elapsed = current_time - start_time
 
                 if mode == 'live':
+                    # Rotate old segments to bound disk usage
+                    deleted = cleanup_old_segments(output_dir, max_segments)
                     segments = count_segments(output_dir)
-                    print(f"[Video] Processing... segments={segments}, elapsed={elapsed:.0f}s")
+                    disk_mb = get_total_segment_size_mb(output_dir)
+                    remaining = f", remaining={duration - elapsed:.0f}s" if duration > 0 else ""
+                    extra = f", cleaned={deleted}" if deleted > 0 else ""
+                    print(f"[Video] Processing... segments={segments}, disk={disk_mb:.1f}MB{extra}, elapsed={elapsed:.0f}s{remaining}")
                 else:
                     if os.path.exists(output_path):
                         size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                        print(f"[Video] Processing... output={size_mb:.1f}MB, elapsed={elapsed:.0f}s")
+                        pct = min(100, (elapsed / duration) * 100) if duration > 0 else 0
+                        print(f"[Video] Processing... output={size_mb:.1f}MB, progress={pct:.0f}%, elapsed={elapsed:.0f}s")
                     else:
                         print(f"[Video] Processing... elapsed={elapsed:.0f}s")
 
@@ -367,6 +424,12 @@ def main():
         help='Output mode: file or live segments (default: file)'
     )
     parser.add_argument(
+        '--max-segments',
+        type=int,
+        default=30,
+        help='Max segments to keep in live mode (default: 30, ~75MB at 2Mbps)'
+    )
+    parser.add_argument(
         '--working_dir',
         type=str,
         default='.',
@@ -380,6 +443,7 @@ def main():
         fps=args.fps,
         duration=args.duration,
         mode=args.mode,
+        max_segments=args.max_segments,
         working_dir=args.working_dir
     )
 

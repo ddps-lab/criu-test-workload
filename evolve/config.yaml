@@ -1,0 +1,131 @@
+# OpenEvolve Configuration for Checkpoint Scheduling Algorithm Evolution
+#
+# Target: evolve/algorithm.py - SchedulingAlgorithm class
+# Goal: Optimize checkpoint success rate while minimizing overhead
+
+# Global settings
+max_iterations: 100
+checkpoint_interval: 10
+log_level: INFO
+random_seed: 42
+language: python
+file_suffix: .py
+
+# Diff-based evolution (recommended for code modification)
+diff_based_evolution: true
+max_code_length: 15000
+
+# Early stopping
+early_stopping_patience: 20
+convergence_threshold: 0.001
+early_stopping_metric: combined_score
+
+# LLM Configuration
+llm:
+  # Use Anthropic Claude API
+  api_base: https://api.anthropic.com/v1
+  # API key from environment: ANTHROPIC_API_KEY
+
+  temperature: 0.7
+  top_p: 0.95
+  max_tokens: 4096
+  timeout: 120
+  retries: 3
+  retry_delay: 5
+
+  # Primary model for evolution
+  primary_model: claude-sonnet-4-20250514
+  primary_model_weight: 0.7
+
+  # Secondary model for diversity
+  secondary_model: claude-haiku-4-20250514
+  secondary_model_weight: 0.3
+
+# Prompt configuration
+prompt:
+  # System message for the evolution task
+  system_message: |
+    You are an expert in checkpoint scheduling algorithms for distributed systems.
+    Your task is to evolve a scheduling algorithm that decides when to trigger
+    pre-dump (incremental checkpoint) or full dump operations.
+
+    The algorithm receives SystemState with:
+    - dirty_rate: Current dirty page rate (pages/sec)
+    - dirty_rate_trend: 'increasing', 'decreasing', or 'stable'
+    - cumulative_dirty: Pages dirtied since last checkpoint
+    - time_since_predump: Seconds since last checkpoint
+    - spot_urgency: UrgencyLevel (CRITICAL, HIGH, MEDIUM, LOW)
+    - checkpoint_duration_estimate: Estimated checkpoint time
+
+    Optimization goals:
+    1. Maximize checkpoint success rate (checkpoints ready before preemption)
+    2. Minimize overhead ratio (checkpoint time / total time)
+
+    Constraints:
+    - CRITICAL urgency requires immediate action if significant dirty data exists
+    - Avoid unnecessary checkpoints (overhead penalty)
+    - Consider dirty rate when determining checkpoint frequency
+
+  # Number of examples to include in prompts
+  num_examples: 3
+
+  # Include best program in prompts
+  include_best_program: true
+
+  # Include parent programs
+  include_parent_programs: true
+  num_parent_programs: 2
+
+# Database configuration (MAP-Elites style)
+database:
+  # Feature dimensions for MAP-Elites
+  feature_dimensions:
+    - name: success_rate
+      min: 0.0
+      max: 1.0
+      num_bins: 10
+    - name: overhead_ratio
+      min: 0.0
+      max: 1.0
+      num_bins: 10
+
+  # Selection strategy
+  selection_strategy: map_elites
+
+  # Population size per cell
+  programs_per_cell: 3
+
+  # How many top programs to keep
+  elite_size: 50
+
+# Evaluator configuration
+evaluator:
+  # Number of parallel evaluations
+  parallel_evaluations: 4
+
+  # Timeout per evaluation (seconds)
+  timeout: 300
+
+  # Cascade evaluation (multi-stage filtering)
+  cascade_evaluation: false
+
+  # Metrics configuration
+  metrics:
+    - name: success_rate
+      weight: 0.7
+      direction: maximize
+
+    - name: overhead_ratio
+      weight: 0.3
+      direction: minimize
+
+    - name: combined_score
+      weight: 1.0
+      direction: maximize
+      primary: true
+
+# Evolution trace (for analysis)
+evolution_trace:
+  enabled: true
+  save_all_programs: false
+  save_top_k: 10

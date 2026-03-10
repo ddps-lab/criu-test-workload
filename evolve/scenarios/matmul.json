@@ -1,0 +1,6404 @@
+{
+  "name": "matmul",
+  "source": "results/10ms/matmul_20260119_080321/dirty_pattern.json",
+  "duration_ms": 16321.591,
+  "page_size": 4096,
+  "dirty_samples": [
+    {
+      "timestamp_ms": 0.435,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10.464,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 20.518,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 30.593,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 40.655,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 50.727,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 60.784,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 71.542,
+      "delta_dirty_count": 6092
+    },
+    {
+      "timestamp_ms": 88.842,
+      "delta_dirty_count": 555
+    },
+    {
+      "timestamp_ms": 98.9,
+      "delta_dirty_count": 2113
+    },
+    {
+      "timestamp_ms": 111.897,
+      "delta_dirty_count": 89
+    },
+    {
+      "timestamp_ms": 121.958,
+      "delta_dirty_count": 1027
+    },
+    {
+      "timestamp_ms": 132.81,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 142.883,
+      "delta_dirty_count": 1125
+    },
+    {
+      "timestamp_ms": 152.942,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 163.009,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 173.07,
+      "delta_dirty_count": 17
+    },
+    {
+      "timestamp_ms": 182.784,
+      "delta_dirty_count": 48
+    },
+    {
+      "timestamp_ms": 192.846,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 202.913,
+      "delta_dirty_count": 17
+    },
+    {
+      "timestamp_ms": 212.971,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 223.027,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 233.091,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 243.16,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 253.22,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 263.282,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 273.348,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 283.411,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 293.476,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 303.538,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 313.619,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 323.68,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 333.745,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 343.808,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 353.871,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 363.938,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 373.992,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 384.051,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 394.121,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 404.174,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 414.243,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 424.3,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 434.37,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 444.44,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 454.499,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 464.565,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 474.64,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 484.713,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 494.77,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 504.836,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 514.898,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 524.96,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 535.012,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 545.075,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 555.141,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 565.205,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 575.269,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 585.332,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 595.4,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 605.465,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 615.525,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 625.604,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 635.668,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 645.73,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 655.794,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 665.856,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 675.918,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 685.986,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 696.046,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 706.12,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 716.175,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 726.241,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 736.302,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 746.375,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 756.437,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 766.501,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 776.564,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 786.643,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 796.706,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 806.772,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 816.834,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 826.899,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 836.962,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 847.017,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 857.078,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 867.144,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 877.206,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 887.27,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 897.336,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 907.397,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 917.46,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 927.528,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 937.602,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 947.669,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 957.731,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 967.803,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 977.86,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 987.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 997.991,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1008.047,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1018.118,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1028.174,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1038.245,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1048.3,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1058.372,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1068.437,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1078.499,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1088.565,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1098.639,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1108.706,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1118.828,
+      "delta_dirty_count": 2794
+    },
+    {
+      "timestamp_ms": 1129.398,
+      "delta_dirty_count": 1339
+    },
+    {
+      "timestamp_ms": 1139.447,
+      "delta_dirty_count": 765
+    },
+    {
+      "timestamp_ms": 1149.34,
+      "delta_dirty_count": 4612
+    },
+    {
+      "timestamp_ms": 1178.709,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 1188.744,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 1198.802,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1208.873,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1218.939,
+      "delta_dirty_count": 31
+    },
+    {
+      "timestamp_ms": 1228.999,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 1239.064,
+      "delta_dirty_count": 32
+    },
+    {
+      "timestamp_ms": 1249.131,
+      "delta_dirty_count": 9
+    },
+    {
+      "timestamp_ms": 1258.846,
+      "delta_dirty_count": 9
+    },
+    {
+      "timestamp_ms": 1268.908,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1278.969,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1289.023,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1299.086,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1309.149,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1319.214,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1329.28,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1339.346,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1349.408,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1359.473,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1369.537,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1379.614,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1389.681,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1399.743,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1409.816,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1419.871,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1429.935,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1439.985,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1450.058,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1460.114,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1470.184,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1480.241,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1490.311,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1500.371,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1510.435,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1520.499,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1530.565,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1540.645,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1550.707,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1560.772,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1570.834,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1580.902,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1590.961,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1601.015,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1611.077,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1621.141,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1631.205,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1641.27,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1651.333,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1661.399,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1671.463,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1681.526,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1691.602,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1701.668,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1711.739,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1721.798,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1731.861,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1741.923,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1751.985,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1762.058,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1772.117,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1782.186,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1792.241,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1802.311,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1812.371,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1822.435,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1832.496,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1842.561,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1852.64,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1862.701,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1872.764,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1882.828,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1892.893,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1902.957,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1913.009,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1923.075,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1933.135,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1943.202,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1953.265,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1963.327,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1973.392,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1983.458,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 1993.522,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2003.601,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2013.668,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2023.729,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2033.792,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2043.86,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2053.926,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2063.993,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2074.063,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2084.113,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2094.18,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2104.239,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2114.312,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2124.368,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2134.434,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2145.091,
+      "delta_dirty_count": 6090
+    },
+    {
+      "timestamp_ms": 2163.126,
+      "delta_dirty_count": 113
+    },
+    {
+      "timestamp_ms": 2173.161,
+      "delta_dirty_count": 565
+    },
+    {
+      "timestamp_ms": 2183.218,
+      "delta_dirty_count": 515
+    },
+    {
+      "timestamp_ms": 2193.269,
+      "delta_dirty_count": 1027
+    },
+    {
+      "timestamp_ms": 2203.33,
+      "delta_dirty_count": 36
+    },
+    {
+      "timestamp_ms": 2213.381,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2223.447,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2233.511,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2243.592,
+      "delta_dirty_count": 28
+    },
+    {
+      "timestamp_ms": 2253.293,
+      "delta_dirty_count": 20
+    },
+    {
+      "timestamp_ms": 2263.358,
+      "delta_dirty_count": 32
+    },
+    {
+      "timestamp_ms": 2273.421,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2283.487,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2293.553,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2303.631,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2313.704,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2323.769,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2333.833,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2343.895,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2353.965,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2364.008,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2374.078,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2384.136,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2394.206,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2404.265,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2414.335,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2424.394,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2434.46,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2444.522,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2454.6,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2464.664,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2474.729,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2484.791,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2494.854,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2504.918,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2514.982,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2525.034,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2535.098,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2545.162,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2555.236,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2565.292,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2575.357,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2585.422,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2595.486,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2605.552,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2615.635,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2625.695,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2635.761,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2645.827,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2655.891,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2665.955,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2676.012,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2686.077,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2696.135,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2706.201,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2716.259,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2726.331,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2736.387,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2746.454,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2756.517,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2766.595,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2776.658,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2786.722,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2796.786,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2806.849,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2816.918,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2826.973,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2837.028,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2847.093,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2857.158,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2867.219,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2877.287,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2887.346,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2897.41,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2907.476,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2917.542,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2927.618,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2937.683,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2947.749,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2957.81,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2967.875,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2977.939,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2987.992,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 2998.059,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3008.119,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3018.191,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3028.244,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3038.318,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3048.372,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3058.437,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3068.5,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3078.565,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3088.644,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3098.708,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3108.771,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3118.839,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3128.9,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3138.969,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3149.023,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3159.083,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3169.145,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3179.209,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3189.274,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3200.553,
+      "delta_dirty_count": 6455
+    },
+    {
+      "timestamp_ms": 3223.009,
+      "delta_dirty_count": 518
+    },
+    {
+      "timestamp_ms": 3233.043,
+      "delta_dirty_count": 21
+    },
+    {
+      "timestamp_ms": 3243.093,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 3253.153,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 3263.214,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 3273.275,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 3283.327,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 3293.393,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 3303.458,
+      "delta_dirty_count": 24
+    },
+    {
+      "timestamp_ms": 3313.18,
+      "delta_dirty_count": 64
+    },
+    {
+      "timestamp_ms": 3323.243,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3333.302,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3343.366,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3353.431,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3363.491,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3373.557,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3383.64,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3393.7,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3403.766,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3413.828,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3423.894,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3433.955,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3444.007,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3454.076,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3464.134,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3474.207,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3484.266,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3494.335,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3504.395,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3514.459,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3524.525,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3534.601,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3544.667,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3554.732,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3564.794,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3574.857,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3584.926,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3594.984,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3605.048,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3615.112,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3625.173,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3635.238,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3645.303,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3655.371,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3665.432,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3675.496,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3685.559,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3695.639,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3705.705,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3715.768,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3725.836,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3735.894,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3745.962,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3756.011,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3766.081,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3776.145,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3786.21,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3796.268,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3806.334,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3816.395,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3826.46,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3836.53,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3846.601,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3856.668,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3866.742,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3876.806,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3886.869,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3896.933,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3906.996,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3917.057,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3927.122,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3937.186,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3947.253,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3957.314,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3967.379,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3977.448,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3987.509,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 3997.573,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4007.65,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4017.716,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4027.78,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4037.837,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4047.9,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4057.973,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4068.021,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4078.086,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4088.143,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4098.211,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4108.27,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4118.34,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4128.398,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4138.463,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4148.527,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4158.606,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4168.671,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4178.737,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4188.8,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4198.862,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4208.928,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4218.98,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4229.452,
+      "delta_dirty_count": 6207
+    },
+    {
+      "timestamp_ms": 4247.495,
+      "delta_dirty_count": 99
+    },
+    {
+      "timestamp_ms": 4257.533,
+      "delta_dirty_count": 1027
+    },
+    {
+      "timestamp_ms": 4267.608,
+      "delta_dirty_count": 57
+    },
+    {
+      "timestamp_ms": 4277.659,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4287.72,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4297.781,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4307.848,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4317.913,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4327.98,
+      "delta_dirty_count": 12
+    },
+    {
+      "timestamp_ms": 4337.699,
+      "delta_dirty_count": 64
+    },
+    {
+      "timestamp_ms": 4347.76,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4357.822,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4367.888,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4377.951,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4388.004,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4398.075,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4408.131,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4418.202,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4428.273,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4438.344,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4448.501,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4458.597,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4468.684,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4478.766,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4488.811,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4498.857,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4508.902,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4518.957,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4529.003,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4539.07,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4549.134,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4559.197,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4569.261,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4579.325,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4589.389,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4599.453,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4609.519,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4619.596,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4629.66,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4639.728,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4649.787,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4659.851,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4669.916,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4679.977,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4690.036,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4700.093,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4710.165,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4720.222,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4730.292,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4740.351,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4750.418,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4760.481,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4770.546,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4780.622,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4790.687,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4800.751,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4810.814,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4820.876,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4830.941,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4840.993,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4851.058,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4861.122,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4871.184,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4881.247,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4891.312,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4901.38,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4911.443,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4921.509,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4931.571,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4941.652,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4951.712,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4961.779,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4971.849,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4981.905,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 4991.967,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5002.029,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5012.083,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5022.156,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5032.212,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5042.279,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5052.343,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5062.404,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5072.468,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5082.532,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5092.612,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5102.676,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5112.738,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5122.804,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5132.865,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5142.93,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5152.982,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5163.045,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5173.11,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5183.173,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5193.239,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5203.301,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5213.368,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5223.431,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5233.495,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5243.559,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5253.634,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5264.552,
+      "delta_dirty_count": 7577
+    },
+    {
+      "timestamp_ms": 5307.502,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 5317.534,
+      "delta_dirty_count": 1124
+    },
+    {
+      "timestamp_ms": 5327.599,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5337.663,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5347.732,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 5357.791,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5367.853,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5377.562,
+      "delta_dirty_count": 64
+    },
+    {
+      "timestamp_ms": 5387.637,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5397.703,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5407.766,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5417.828,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5427.9,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5437.967,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5448.008,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5458.082,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5468.139,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5478.205,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5488.264,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5498.337,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5508.396,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5518.457,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5528.522,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5538.602,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5548.67,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5558.729,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5568.791,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5578.858,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5588.921,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5598.982,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5609.035,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5619.1,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5629.167,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5639.227,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5649.293,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5659.356,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5669.421,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5679.484,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5689.548,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5699.627,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5709.69,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5719.753,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5729.819,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5739.881,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5749.949,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5759.997,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5770.068,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5780.126,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5790.196,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5800.255,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5810.326,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5820.383,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5830.445,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5840.509,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5850.574,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5860.651,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5870.714,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5880.777,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5890.842,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5900.906,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5910.969,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5921.021,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5931.085,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5941.152,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5951.214,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5961.276,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5971.344,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5981.405,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 5991.47,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6001.533,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6011.61,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6021.672,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6031.737,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6041.797,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6051.864,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6061.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6071.985,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6082.055,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6092.116,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6102.183,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6112.243,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6122.309,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6132.37,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6142.433,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6152.497,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6162.562,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6172.642,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6182.704,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6192.768,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6202.836,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6212.894,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6222.96,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6233.011,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6243.075,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6253.139,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6263.202,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6273.267,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6283.332,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6293.395,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6303.457,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6314.044,
+      "delta_dirty_count": 7966
+    },
+    {
+      "timestamp_ms": 6350.286,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6360.35,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 6370.362,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6380.413,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6390.484,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6400.541,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6410.622,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 6420.322,
+      "delta_dirty_count": 64
+    },
+    {
+      "timestamp_ms": 6430.387,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6440.446,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6450.512,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6460.594,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6470.658,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6480.721,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6490.787,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6500.852,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6510.913,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6520.975,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6530.996,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6541.06,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6551.124,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6561.189,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6571.253,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6581.318,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6591.382,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6601.445,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6611.509,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6621.576,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6631.653,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6641.72,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6651.782,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6661.849,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6671.914,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6681.981,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6692.028,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6702.101,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6712.156,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6722.228,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6732.282,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6742.35,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6752.409,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6762.474,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6772.539,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6782.617,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6792.686,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6802.745,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6812.809,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6822.872,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6832.937,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6842.988,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6853.05,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6863.114,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6873.179,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6883.251,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6893.31,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6903.375,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6913.442,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6923.503,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6933.567,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6943.645,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6953.709,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6963.78,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6973.842,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6983.907,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 6993.975,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7004.024,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7014.101,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7024.155,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7034.227,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7044.291,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7054.354,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7064.416,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7074.474,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7084.54,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7094.622,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7104.682,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7114.744,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7124.807,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7134.867,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7144.931,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7154.982,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7165.048,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7175.109,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7185.173,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7195.238,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7205.299,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7215.362,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7225.424,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7235.488,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7245.552,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7255.629,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7265.694,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7275.756,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7285.818,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7295.886,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7305.944,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7315.995,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7326.068,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7337.427,
+      "delta_dirty_count": 8098
+    },
+    {
+      "timestamp_ms": 7370.238,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7380.283,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 7390.332,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7400.379,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7410.45,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7420.506,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7430.595,
+      "delta_dirty_count": 31
+    },
+    {
+      "timestamp_ms": 7440.654,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7450.364,
+      "delta_dirty_count": 48
+    },
+    {
+      "timestamp_ms": 7460.431,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7470.496,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7480.556,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7490.634,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7500.702,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7510.767,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7520.83,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7530.891,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7540.955,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7551.008,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7561.073,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7571.137,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7581.201,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7591.266,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7601.331,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7611.395,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7621.46,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7631.523,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7641.602,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7651.67,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7661.732,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7671.801,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7681.863,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7691.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7701.991,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7712.048,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7722.119,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7732.177,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7742.248,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7752.31,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7762.374,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7772.434,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7782.499,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7792.566,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7802.642,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7812.71,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7822.771,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7832.835,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7842.899,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7852.966,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7863.014,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7873.081,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7883.143,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7893.208,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7903.269,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7913.335,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7923.403,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7933.463,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7943.529,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7953.605,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7963.673,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7973.736,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7983.797,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 7993.862,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8003.924,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8013.998,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8024.05,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8034.118,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8044.176,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8054.246,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8064.304,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8074.369,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8084.432,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8094.497,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8104.564,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8114.639,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8124.705,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8134.77,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8144.833,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8154.897,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8164.958,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8175.007,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8185.071,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8195.133,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8205.195,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8215.258,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8225.32,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8235.386,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8245.447,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8255.51,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8265.59,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8275.652,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8285.715,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8295.776,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8305.838,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8315.899,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8325.966,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8336.014,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8346.08,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8356.695,
+      "delta_dirty_count": 6091
+    },
+    {
+      "timestamp_ms": 8374.175,
+      "delta_dirty_count": 230
+    },
+    {
+      "timestamp_ms": 8384.211,
+      "delta_dirty_count": 2430
+    },
+    {
+      "timestamp_ms": 8399.912,
+      "delta_dirty_count": 532
+    },
+    {
+      "timestamp_ms": 8409.981,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 8420.036,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 8430.14,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 8440.179,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8450.249,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8460.306,
+      "delta_dirty_count": 10
+    },
+    {
+      "timestamp_ms": 8470.017,
+      "delta_dirty_count": 48
+    },
+    {
+      "timestamp_ms": 8480.074,
+      "delta_dirty_count": 15
+    },
+    {
+      "timestamp_ms": 8490.147,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8500.203,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8510.278,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8520.334,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8530.397,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8540.46,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8550.531,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8560.609,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8570.672,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8580.737,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8590.801,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8600.862,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8610.928,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8620.989,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8631.051,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8641.118,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8651.18,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8661.247,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8671.312,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8681.376,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8691.439,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8701.504,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8711.568,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8721.646,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8731.71,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8741.775,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8751.837,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8761.907,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8771.963,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8782.023,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8792.082,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8802.159,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8812.211,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8822.283,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8832.342,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8842.402,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8852.469,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8862.535,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8872.61,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8882.679,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8892.74,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8902.802,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8912.869,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8922.933,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8932.986,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8943.047,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8953.114,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8963.175,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8973.244,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8983.305,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 8993.371,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9003.434,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9013.497,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9023.563,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9033.641,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9043.703,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9053.766,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9063.83,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9073.894,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9083.961,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9094.015,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9104.073,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9114.144,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9124.202,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9134.273,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9144.33,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9154.4,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9164.46,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9174.527,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9184.612,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9194.671,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9204.733,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9214.798,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9224.864,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9234.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9244.984,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9255.05,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9265.114,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9275.179,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9285.244,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9295.309,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9305.371,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9315.435,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9325.498,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9335.564,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9345.641,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9355.706,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9365.769,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9375.831,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9386.492,
+      "delta_dirty_count": 6093
+    },
+    {
+      "timestamp_ms": 9404.378,
+      "delta_dirty_count": 608
+    },
+    {
+      "timestamp_ms": 9414.409,
+      "delta_dirty_count": 4643
+    },
+    {
+      "timestamp_ms": 9443.641,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 9453.704,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 9463.763,
+      "delta_dirty_count": 3
+    },
+    {
+      "timestamp_ms": 9473.824,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 9483.882,
+      "delta_dirty_count": 7
+    },
+    {
+      "timestamp_ms": 9493.946,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 9503.66,
+      "delta_dirty_count": 26
+    },
+    {
+      "timestamp_ms": 9513.724,
+      "delta_dirty_count": 7
+    },
+    {
+      "timestamp_ms": 9523.786,
+      "delta_dirty_count": 11
+    },
+    {
+      "timestamp_ms": 9533.85,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9543.915,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9553.982,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9564.031,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9574.105,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9584.164,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9594.23,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9604.287,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9614.355,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9624.422,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9634.484,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9644.55,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9654.627,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9664.691,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9674.755,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9684.822,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9694.889,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9704.947,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9714.997,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9725.063,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9735.128,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9745.191,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9755.256,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9765.319,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9775.383,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9785.45,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9795.511,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9805.59,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9815.656,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9825.718,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9835.782,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9845.845,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9855.91,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9865.976,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9876.026,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9886.095,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9896.151,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9906.224,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9916.28,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9926.347,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9936.406,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9946.474,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9956.535,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9966.613,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9976.679,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9986.865,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 9996.814,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10006.873,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10016.934,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10026.986,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10037.051,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10047.111,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10057.179,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10067.24,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10077.305,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10087.372,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10097.433,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10107.504,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10117.561,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10127.64,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10137.702,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10147.772,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10157.83,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10167.896,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10177.964,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10188.011,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10198.081,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10208.139,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10218.212,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10228.266,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10238.336,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10248.4,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10258.463,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10268.526,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10278.604,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10288.669,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10298.74,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10308.8,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10318.862,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10328.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10338.985,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10349.048,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10359.114,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10369.181,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10379.239,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10389.303,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10399.367,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10410.028,
+      "delta_dirty_count": 6111
+    },
+    {
+      "timestamp_ms": 10428.315,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 10438.351,
+      "delta_dirty_count": 515
+    },
+    {
+      "timestamp_ms": 10448.4,
+      "delta_dirty_count": 613
+    },
+    {
+      "timestamp_ms": 10458.47,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10468.532,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10478.614,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10488.669,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10498.738,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10508.805,
+      "delta_dirty_count": 26
+    },
+    {
+      "timestamp_ms": 10518.569,
+      "delta_dirty_count": 26
+    },
+    {
+      "timestamp_ms": 10528.569,
+      "delta_dirty_count": 32
+    },
+    {
+      "timestamp_ms": 10538.647,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10548.709,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10558.774,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10568.842,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10578.904,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10588.965,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10599.019,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10609.083,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10619.146,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10629.212,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10639.274,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10649.337,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10659.406,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10669.469,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10679.535,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10689.618,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10699.679,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10709.74,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10719.803,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10729.867,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10739.927,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10749.995,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10760.052,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10770.125,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10780.178,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10790.248,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10800.307,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10810.374,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10820.437,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10830.502,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10840.566,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10850.647,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10860.711,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10870.775,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10880.841,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10890.904,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10900.966,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10911.017,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10921.082,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10931.144,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10941.211,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10951.275,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10961.337,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10971.404,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10981.467,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 10991.535,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11001.616,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11011.673,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11021.734,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11031.799,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11041.862,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11051.927,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11061.983,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11072.043,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11082.118,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11092.171,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11102.242,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11112.298,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11122.372,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11132.435,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11142.497,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11152.562,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11162.641,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11172.704,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11182.767,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11192.828,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11202.9,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11212.958,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11223.011,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11233.075,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11243.141,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11253.206,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11263.268,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11273.331,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11283.396,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11293.456,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11303.519,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11313.602,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11323.66,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11333.72,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11343.788,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11353.85,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11363.913,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11373.981,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11384.031,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11394.098,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11404.158,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11414.227,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11424.283,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11434.352,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11444.967,
+      "delta_dirty_count": 6093
+    },
+    {
+      "timestamp_ms": 11462.497,
+      "delta_dirty_count": 537
+    },
+    {
+      "timestamp_ms": 11472.552,
+      "delta_dirty_count": 2440
+    },
+    {
+      "timestamp_ms": 11487.865,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11497.928,
+      "delta_dirty_count": 84
+    },
+    {
+      "timestamp_ms": 11507.988,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 11518.05,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11528.111,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11538.182,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11548.24,
+      "delta_dirty_count": 5
+    },
+    {
+      "timestamp_ms": 11557.954,
+      "delta_dirty_count": 49
+    },
+    {
+      "timestamp_ms": 11568.008,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11578.076,
+      "delta_dirty_count": 17
+    },
+    {
+      "timestamp_ms": 11588.134,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11598.206,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11608.263,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11618.335,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11628.394,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11638.457,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11648.522,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11658.599,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11668.664,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11678.727,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11688.791,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11698.861,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11708.923,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11718.992,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11729.047,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11739.115,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11749.175,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11759.239,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11769.303,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11779.373,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11789.435,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11799.501,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11809.565,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11819.645,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11829.708,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11839.771,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11849.839,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11859.903,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11869.973,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11880.018,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11890.09,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11900.147,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11910.214,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11920.271,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11930.339,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11940.398,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11950.466,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11960.53,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11970.61,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11980.672,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 11990.735,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12000.799,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12010.864,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12020.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12030.987,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12041.053,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12051.115,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12061.178,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12071.243,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12081.307,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12091.372,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12101.435,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12111.499,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12121.564,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12131.64,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12141.706,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12151.772,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12161.834,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12171.899,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12181.968,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12192.015,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12202.088,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12212.142,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12222.213,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12232.273,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12242.343,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12252.405,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12262.465,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12272.53,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12282.608,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12292.674,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12302.737,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12312.804,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12322.872,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12332.928,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12342.978,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12353.044,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12363.108,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12373.169,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12383.234,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12393.303,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12403.361,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12413.427,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12423.493,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12433.553,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12443.631,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12453.693,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12463.755,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12474.243,
+      "delta_dirty_count": 6111
+    },
+    {
+      "timestamp_ms": 12491.541,
+      "delta_dirty_count": 2981
+    },
+    {
+      "timestamp_ms": 12510.732,
+      "delta_dirty_count": 1028
+    },
+    {
+      "timestamp_ms": 12520.786,
+      "delta_dirty_count": 1027
+    },
+    {
+      "timestamp_ms": 12530.843,
+      "delta_dirty_count": 546
+    },
+    {
+      "timestamp_ms": 12540.905,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12550.968,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12561.033,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 12571.1,
+      "delta_dirty_count": 7
+    },
+    {
+      "timestamp_ms": 12580.817,
+      "delta_dirty_count": 50
+    },
+    {
+      "timestamp_ms": 12590.881,
+      "delta_dirty_count": 15
+    },
+    {
+      "timestamp_ms": 12600.944,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12610.997,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12621.066,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12631.127,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12641.189,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12651.252,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12661.317,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12671.384,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12681.452,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12691.515,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12701.591,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12711.659,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12721.724,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12731.784,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12741.847,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12751.908,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12761.977,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12772.023,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12782.093,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12792.15,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12802.22,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12812.281,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12822.348,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12832.409,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12842.472,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12852.537,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12862.615,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12872.682,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12882.741,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12892.811,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12902.87,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12912.935,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12922.988,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12933.052,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12943.117,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12953.179,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12963.245,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12973.309,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12983.372,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 12993.436,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13003.502,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13013.569,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13023.65,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13033.71,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13043.773,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13053.837,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13063.899,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13073.967,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13084.024,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13094.084,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13104.144,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13114.213,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13124.27,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13134.341,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13144.402,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13154.469,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13164.529,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13174.605,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13184.674,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13194.735,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13204.801,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13214.864,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13224.929,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13234.978,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13245.046,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13255.11,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13265.176,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13275.236,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13285.302,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13295.366,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13305.431,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13315.494,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13325.561,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13335.638,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13345.704,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13355.772,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13365.829,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13375.894,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13385.965,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13396.008,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13406.081,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13416.138,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13426.208,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13436.264,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13446.333,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13456.392,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13466.46,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13476.521,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13486.599,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13496.666,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13506.732,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13516.791,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13526.891,
+      "delta_dirty_count": 5417
+    },
+    {
+      "timestamp_ms": 13544.228,
+      "delta_dirty_count": 136
+    },
+    {
+      "timestamp_ms": 13554.253,
+      "delta_dirty_count": 708
+    },
+    {
+      "timestamp_ms": 13564.307,
+      "delta_dirty_count": 1028
+    },
+    {
+      "timestamp_ms": 13574.364,
+      "delta_dirty_count": 1028
+    },
+    {
+      "timestamp_ms": 13584.421,
+      "delta_dirty_count": 29
+    },
+    {
+      "timestamp_ms": 13594.492,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13604.55,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13614.636,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13624.694,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13634.757,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13644.465,
+      "delta_dirty_count": 64
+    },
+    {
+      "timestamp_ms": 13654.531,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13664.607,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13674.669,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13684.735,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13694.797,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13704.862,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13714.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13724.984,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13735.049,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13745.114,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13755.177,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13765.241,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13775.302,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13785.367,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13795.433,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13805.497,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13815.563,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13825.642,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13835.706,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13845.766,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13855.83,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13865.894,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13875.956,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13886.013,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13896.07,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13906.14,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13916.199,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13926.269,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13936.329,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13946.391,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13956.455,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13966.517,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13976.597,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13986.663,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 13996.726,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14006.787,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14016.851,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14026.914,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14036.98,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14047.031,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14057.095,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14067.158,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14077.222,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14087.285,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14097.35,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14107.416,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14117.482,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14127.546,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14137.629,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14147.689,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14157.752,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14167.815,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14177.882,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14187.943,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14198.002,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14208.057,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14218.127,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14228.186,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14238.256,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14248.314,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14258.377,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14268.442,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14278.506,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14288.572,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14298.649,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14308.71,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14318.777,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14328.84,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14338.908,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14348.966,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14359.018,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14369.08,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14379.144,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14389.206,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14399.271,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14409.337,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14419.401,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14429.462,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14439.527,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14449.604,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14459.668,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14469.732,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14479.796,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14489.859,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14499.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14509.99,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14520.047,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14530.121,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14540.173,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14550.246,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14560.303,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14570.371,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14580.851,
+      "delta_dirty_count": 5989
+    },
+    {
+      "timestamp_ms": 14598.462,
+      "delta_dirty_count": 2
+    },
+    {
+      "timestamp_ms": 14608.492,
+      "delta_dirty_count": 963
+    },
+    {
+      "timestamp_ms": 14618.556,
+      "delta_dirty_count": 515
+    },
+    {
+      "timestamp_ms": 14628.62,
+      "delta_dirty_count": 1027
+    },
+    {
+      "timestamp_ms": 14638.692,
+      "delta_dirty_count": 613
+    },
+    {
+      "timestamp_ms": 14648.75,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14658.816,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14668.882,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14678.945,
+      "delta_dirty_count": 14
+    },
+    {
+      "timestamp_ms": 14688.659,
+      "delta_dirty_count": 34
+    },
+    {
+      "timestamp_ms": 14698.725,
+      "delta_dirty_count": 32
+    },
+    {
+      "timestamp_ms": 14708.789,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14718.852,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14728.915,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14738.979,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14749.033,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14759.094,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14769.158,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14779.225,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14789.289,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14799.358,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14809.42,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14819.482,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14829.547,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14839.625,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14849.694,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14859.756,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14869.816,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14879.882,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14889.944,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14899.996,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14910.065,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14920.126,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14930.197,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14940.252,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14950.322,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14960.384,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14970.444,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14980.513,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 14990.573,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15000.659,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15010.713,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15020.782,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15030.845,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15040.908,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15050.972,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15061.018,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15071.08,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15081.145,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15091.208,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15101.273,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15111.34,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15121.401,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15131.47,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15141.531,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15151.613,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15161.673,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15171.742,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15181.804,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15191.865,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15201.929,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15211.983,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15222.055,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15232.114,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15242.18,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15252.236,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15262.306,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15272.364,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15282.429,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15292.489,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15302.554,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15312.631,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15322.692,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15332.755,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15342.82,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15352.884,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15362.958,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15372.998,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15383.06,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15393.125,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15403.19,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15413.252,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15423.316,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15433.381,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15443.445,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15453.508,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15463.572,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15473.65,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15483.713,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15493.777,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15503.841,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15513.905,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15523.967,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15534.028,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15544.083,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15554.153,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15564.212,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15574.283,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15584.343,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15594.405,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15604.469,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15614.533,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15624.615,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15635.109,
+      "delta_dirty_count": 8288
+    },
+    {
+      "timestamp_ms": 15667.812,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 15677.842,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15687.903,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15697.974,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15708.029,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15718.099,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15728.156,
+      "delta_dirty_count": 26
+    },
+    {
+      "timestamp_ms": 15737.879,
+      "delta_dirty_count": 64
+    },
+    {
+      "timestamp_ms": 15747.94,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15758.001,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15768.056,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15778.124,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15788.185,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15798.254,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15808.312,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15818.377,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15828.44,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15838.504,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15848.576,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15858.65,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15868.713,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15878.775,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15888.84,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15898.901,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15908.963,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15919.016,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15929.083,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15939.144,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15949.211,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15959.277,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15969.341,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15979.409,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15989.468,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 15999.531,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16009.611,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16019.674,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16029.736,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16039.806,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16049.861,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16059.925,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16069.998,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16080.059,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16090.12,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16100.177,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16110.248,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16120.308,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16130.372,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16140.437,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16150.495,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16160.559,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16170.638,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16180.703,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16190.764,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16200.827,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16210.893,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16220.964,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16231.011,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16241.069,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16251.131,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16261.203,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 16271.265,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16281.327,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 16291.392,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 16301.464,
+      "delta_dirty_count": 1
+    },
+    {
+      "timestamp_ms": 16311.51,
+      "delta_dirty_count": 0
+    },
+    {
+      "timestamp_ms": 16321.591,
+      "delta_dirty_count": 32
+    }
+  ],
+  "metadata": {
+    "total_dirty_pages": 143736,
+    "avg_dirty_rate_pages_per_sec": 8806.494415893645,
+    "peak_dirty_rate_pages_per_sec": 789784.6388411977,
+    "dirty_sample_ratio": 0.08140262993112085,
+    "sample_count": 1597,
+    "sample_interval_ms": 10.22628822055138
+  }
+}
