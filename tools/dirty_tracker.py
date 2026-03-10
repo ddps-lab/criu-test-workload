@@ -411,8 +411,12 @@ class DirtyPageTracker:
                 'root_pid': self.root_pid,
                 'track_children': self.track_children,
                 'tracking_duration_ms': 0,
+                'page_size': self.PAGE_SIZE,
+                'pagemap_scan_used': False,
+                'clear_on_scan': not self.no_clear,
                 'samples': [],
-                'summary': {}
+                'summary': {},
+                'dirty_rate_timeline': []
             }
 
         duration_ms = self.samples[-1].timestamp_ms
@@ -484,6 +488,7 @@ class DirtyPageTracker:
             'track_children': self.track_children,
             'tracking_duration_ms': duration_ms,
             'page_size': self.PAGE_SIZE,
+            'pagemap_scan_used': False,
             'clear_on_scan': not self.no_clear,
             'samples': samples_data,
             'summary': {

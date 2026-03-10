@@ -106,10 +106,12 @@ class DirtySample:
 class DirtyPattern:
     """Aggregated dirty page pattern for simulation."""
     workload: str
-    pid: int  # Root PID
+    root_pid: int
     tracking_duration_ms: float
     page_size: int = 4096
     track_children: bool = True
+    pagemap_scan_used: bool = False
+    clear_on_scan: bool = True
     samples: List[DirtySample] = field(default_factory=list)
     summary: Dict[str, Any] = field(default_factory=dict)
     dirty_rate_timeline: List[Dict[str, Any]] = field(default_factory=list)
@@ -476,9 +478,11 @@ class DirtyPageTracker:
         if not self.samples:
             return DirtyPattern(
                 workload=workload_name,
-                pid=self.root_pid,
+                root_pid=self.root_pid,
                 tracking_duration_ms=0,
-                track_children=self.track_children
+                track_children=self.track_children,
+                pagemap_scan_used=False,
+                clear_on_scan=not self.no_clear
             )
 
         # Calculate duration
@@ -545,10 +549,12 @@ class DirtyPageTracker:
 
         return DirtyPattern(
             workload=workload_name,
-            pid=self.root_pid,
+            root_pid=self.root_pid,
             tracking_duration_ms=duration_ms,
             page_size=self.PAGE_SIZE,
             track_children=self.track_children,
+            pagemap_scan_used=False,
+            clear_on_scan=not self.no_clear,
             samples=self.samples,
             summary=summary,
             dirty_rate_timeline=dirty_rate_timeline

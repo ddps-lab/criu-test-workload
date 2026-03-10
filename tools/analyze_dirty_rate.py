@@ -303,7 +303,7 @@ def generate_analysis_report(data: Dict[str, Any]) -> Dict[str, Any]:
     # Build report
     report = {
         'workload': data.get('workload', 'unknown'),
-        'pid': data.get('pid', 0),
+        'pid': data.get('root_pid', data.get('pid', 0)),
         'tracking_duration_ms': data.get('tracking_duration_ms', 0),
 
         'dirty_rate_analysis': {

@@ -116,6 +116,7 @@ type DirtyPattern struct {
 	TrackChildren      bool             `json:"track_children"`
 	TrackingDurationMs float64          `json:"tracking_duration_ms"`
 	PageSize           int              `json:"page_size"`
+	PagemapScanUsed    bool             `json:"pagemap_scan_used"`
 	ClearOnScan        bool             `json:"clear_on_scan"`
 	Samples            []DirtySample    `json:"samples"`
 	Summary            Summary          `json:"summary"`
@@ -515,10 +516,12 @@ func (dt *DirtyPageTracker) GetDirtyPattern() DirtyPattern {
 
 	if len(dt.samples) == 0 {
 		return DirtyPattern{
-			Workload:      dt.workloadName,
-			RootPid:       dt.rootPid,
-			TrackChildren: dt.trackChildren,
-			PageSize:      PageSize,
+			Workload:        dt.workloadName,
+			RootPid:         dt.rootPid,
+			TrackChildren:   dt.trackChildren,
+			PageSize:        PageSize,
+			PagemapScanUsed: false,
+			ClearOnScan:     !dt.noClear,
 		}
 	}
 
@@ -625,6 +628,7 @@ func (dt *DirtyPageTracker) GetDirtyPattern() DirtyPattern {
 		TrackChildren:      dt.trackChildren,
 		TrackingDurationMs: durationMs,
 		PageSize:           PageSize,
+		PagemapScanUsed:    false,
 		ClearOnScan:        !dt.noClear,
 		Samples:            dt.samples,
 		Summary:            summary,

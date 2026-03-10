@@ -139,6 +139,10 @@ typedef struct {
     uint64_t *unique_addrs;
     int unique_count;
     int unique_capacity;
+
+    /* VMA type counters (indexed by vma_type_t) */
+    int vma_type_counts[7];
+    int vma_type_sizes[7];
 } tracker_t;
 
 static volatile sig_atomic_t stop_flag = 0;
@@ -395,6 +399,8 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, sample_t *sample) {
                 strncpy(page->perms, vma->perms, sizeof(page->perms) - 1);
                 strncpy(page->pathname, vma->pathname, sizeof(page->pathname) - 1);
 
+                t->vma_type_counts[vma->type]++;
+                t->vma_type_sizes[vma->type] += PAGE_SIZE;
                 add_unique_addr(t, addr);
             }
         }
@@ -448,6 +454,8 @@ static int read_dirty_pages_soft_dirty(tracker_t *t, sample_t *sample) {
                 strncpy(page->perms, vma->perms, sizeof(page->perms) - 1);
                 strncpy(page->pathname, vma->pathname, sizeof(page->pathname) - 1);
 
+                t->vma_type_counts[vma->type]++;
+                t->vma_type_sizes[vma->type] += PAGE_SIZE;
                 add_unique_addr(t, page->addr);
             }
         }
@@ -501,6 +509,43 @@ static void write_json_output(tracker_t *t, const char *workload, const char *ou
         return;
     }
 
+    /* Calculate rates for timeline */
+    double *rates = NULL;
+    int *cumulative = NULL;
+    double avg_rate = 0, peak_rate = 0;
+
+    if (t->sample_count > 0) {
+        rates = calloc(t->sample_count, sizeof(double));
+        cumulative = calloc(t->sample_count, sizeof(int));
+
+        cumulative[0] = t->samples[0].page_count;
+        rates[0] = 0;
+
+        for (int i = 1; i < t->sample_count; i++) {
+            cumulative[i] = cumulative[i-1] + t->samples[i].page_count;
+            double delta_time = (t->samples[i].timestamp_ms - t->samples[i-1].timestamp_ms) / 1000.0;
+            if (delta_time > 0) {
+                rates[i] = t->samples[i].page_count / delta_time;
+            }
+        }
+
+        /* Calculate avg and peak rates */
+        double rate_sum = 0;
+        int positive_count = 0;
+        for (int i = 0; i < t->sample_count; i++) {
+            if (rates[i] > 0) {
+                rate_sum += rates[i];
+                positive_count++;
+                if (rates[i] > peak_rate) peak_rate = rates[i];
+            }
+        }
+        if (positive_count > 0) avg_rate = rate_sum / positive_count;
+    }
+
+    /* Calculate VMA distribution */
+    int total_vma_events = 0;
+    for (int i = 0; i < 7; i++) total_vma_events += t->vma_type_counts[i];
+
     fprintf(f, "{\n");
     fprintf(f, "  \"workload\": \"%s\",\n", workload);
     fprintf(f, "  \"root_pid\": %d,\n", t->pid);
@@ -538,11 +583,59 @@ static void write_json_output(tracker_t *t, const char *workload, const char *ou
     fprintf(f, "    \"total_unique_pages\": %d,\n", t->unique_count);
     fprintf(f, "    \"total_dirty_events\": %d,\n", t->total_dirty_pages);
     fprintf(f, "    \"total_dirty_size_bytes\": %d,\n", t->total_dirty_pages * PAGE_SIZE);
+    fprintf(f, "    \"avg_dirty_rate_per_sec\": %.2f,\n", avg_rate);
+    fprintf(f, "    \"peak_dirty_rate\": %.2f,\n", peak_rate);
+
+    /* VMA distribution (ratios) */
+    fprintf(f, "    \"vma_distribution\": {");
+    {
+        int first = 1;
+        const char *type_names[] = {"heap", "stack", "anonymous", "code", "data", "vdso", "unknown"};
+        for (int i = 0; i < 7; i++) {
+            if (t->vma_type_counts[i] > 0) {
+                double ratio = total_vma_events > 0 ? (double)t->vma_type_counts[i] / total_vma_events : 0;
+                fprintf(f, "%s\"%s\": %.6f", first ? "" : ", ", type_names[i], ratio);
+                first = 0;
+            }
+        }
+    }
+    fprintf(f, "},\n");
+
+    /* VMA size distribution (bytes) */
+    fprintf(f, "    \"vma_size_distribution\": {");
+    {
+        int first = 1;
+        const char *type_names[] = {"heap", "stack", "anonymous", "code", "data", "vdso", "unknown"};
+        for (int i = 0; i < 7; i++) {
+            if (t->vma_type_sizes[i] > 0) {
+                fprintf(f, "%s\"%s\": %d", first ? "" : ", ", type_names[i], t->vma_type_sizes[i]);
+                first = 0;
+            }
+        }
+    }
+    fprintf(f, "},\n");
+
     fprintf(f, "    \"sample_count\": %d,\n", t->sample_count);
-    fprintf(f, "    \"interval_ms\": %d\n", t->interval_ms);
-    fprintf(f, "  }\n");
+    fprintf(f, "    \"interval_ms\": %d,\n", t->interval_ms);
+    fprintf(f, "    \"max_processes_tracked\": 1,\n");
+    fprintf(f, "    \"total_pids_seen\": [%d]\n", t->pid);
+    fprintf(f, "  },\n");
+
+    /* Dirty rate timeline */
+    fprintf(f, "  \"dirty_rate_timeline\": [\n");
+    for (int i = 0; i < t->sample_count; i++) {
+        fprintf(f, "    {\"timestamp_ms\": %.3f, \"rate_pages_per_sec\": %.2f, \"cumulative_pages\": %d, \"processes_tracked\": 1}%s\n",
+                t->samples[i].timestamp_ms,
+                rates ? rates[i] : 0.0,
+                cumulative ? cumulative[i] : 0,
+                i < t->sample_count - 1 ? "," : "");
+    }
+    fprintf(f, "  ]\n");
 
     fprintf(f, "}\n");
+
+    free(rates);
+    free(cumulative);
 
     if (output_file) fclose(f);
 }

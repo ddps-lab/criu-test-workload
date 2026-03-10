@@ -913,21 +913,68 @@ sudo python3 tools/dirty_tracker.py --pid PID --interval 100 --duration 30 --out
 | `--dirty-track-duration` | - | 추적 시간 (초, 기본: 체크포인트까지) |
 | `--dirty-no-clear` | false | 스캔 후 dirty bit clear 안 함 (accumulate 모드) |
 
-### 출력 형식
+### Tracking-Only 모드 (마이그레이션 없이 로컬 실행)
 
-JSON 출력에 `clear_on_scan` 필드가 포함되어 clear 모드를 확인할 수 있습니다:
+워크로드를 로컬에서 실행하면서 dirty page만 추적합니다. 마이그레이션 없이 워크로드의 메모리 동작을 분석할 때 사용합니다.
+
+```bash
+# matmul 워크로드 30초 추적
+python3 experiments/dirty_track_only.py --workload matmul --duration 30
+
+# 결과를 파일로 저장
+python3 experiments/dirty_track_only.py --workload matmul --duration 60 \
+    --dirty-track-interval 200 --output dirty_matmul.json
+
+# no-clear 모드 (누적 측정)
+python3 experiments/dirty_track_only.py --workload memory --duration 30 \
+    --dirty-no-clear --output dirty_memory.json --mb-size 64
+
+# 분석 결과 자동 출력 (기본 활성화, --no-analyze로 비활성)
+python3 experiments/dirty_track_only.py --workload matmul --duration 30 \
+    --output dirty_matmul.json
+
+# 분석만 별도 실행
+python3 tools/analyze_dirty_rate.py -i dirty_matmul.json
+```
+
+지원 워크로드: `memory`, `matmul`, `redis`, `ml_training`, `video`, `dataproc`, `jupyter`
+
+### 출력 형식 (통합)
+
+C/Go/Python 트래커 모두 동일한 JSON 스키마를 출력합니다. `analyze_dirty_rate.py`로 분석 가능합니다.
 
 ```json
 {
   "workload": "memory",
   "root_pid": 12345,
-  "clear_on_scan": true,
+  "track_children": true,
+  "tracking_duration_ms": 30000.0,
+  "page_size": 4096,
   "pagemap_scan_used": true,
-  "samples": [...],
+  "clear_on_scan": true,
+  "samples": [
+    {
+      "timestamp_ms": 100.0,
+      "dirty_pages": [{"addr": "0x...", "vma_type": "heap", "vma_perms": "rw-p", "pathname": "[heap]", "size": 4096}],
+      "delta_dirty_count": 150,
+      "pids_tracked": [12345]
+    }
+  ],
   "summary": {
     "total_unique_pages": 12450,
+    "total_dirty_events": 50000,
+    "total_dirty_size_bytes": 204800000,
     "avg_dirty_rate_per_sec": 1000.5,
-    "peak_dirty_rate": 5000.0
-  }
+    "peak_dirty_rate": 5000.0,
+    "vma_distribution": {"heap": 0.65, "anonymous": 0.35},
+    "vma_size_distribution": {"heap": 12345678, "anonymous": 6789012},
+    "sample_count": 300,
+    "interval_ms": 100,
+    "max_processes_tracked": 1,
+    "total_pids_seen": [12345]
+  },
+  "dirty_rate_timeline": [
+    {"timestamp_ms": 100.0, "rate_pages_per_sec": 1500.0, "cumulative_pages": 150, "processes_tracked": 1}
+  ]
 }
 ```
