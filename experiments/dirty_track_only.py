@@ -328,7 +328,8 @@ def main():
     workload_proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        stderr=subprocess.PIPE,
+        start_new_session=True  # setsid: prevent process group kill from sudo tracker
     )
 
     tracker = None
