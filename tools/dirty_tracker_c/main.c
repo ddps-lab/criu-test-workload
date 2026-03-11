@@ -445,6 +445,9 @@ static int setup_userfaultfd_wp(tracker_t *t)
     pid_t pid = t->pid;
     int ret = -1;
 
+    struct timespec inject_start, inject_end;
+    clock_gettime(CLOCK_MONOTONIC, &inject_start);
+
     /* 1. Seize and interrupt the target process */
     if (ptrace(PTRACE_SEIZE, pid, 0, 0) < 0) {
         fprintf(stderr, "ptrace SEIZE failed (pid=%d): %s\n", pid, strerror(errno));
@@ -609,6 +612,12 @@ restore:
 
 detach:
     ptrace(PTRACE_DETACH, pid, 0, 0);
+
+    clock_gettime(CLOCK_MONOTONIC, &inject_end);
+    double inject_ms = (inject_end.tv_sec - inject_start.tv_sec) * 1000.0 +
+                       (inject_end.tv_nsec - inject_start.tv_nsec) / 1000000.0;
+    fprintf(stderr, "ptrace injection took %.3f ms (process paused for this duration)\n", inject_ms);
+
     return ret;
 }
 
