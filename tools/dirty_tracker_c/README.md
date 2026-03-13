@@ -9,6 +9,8 @@ C dirty tracker는 Linux 6.7+의 `PAGEMAP_SCAN` ioctl과 userfaultfd write-prote
 uffd-wp setup이 실패하면 에러로 종료한다 (soft-dirty fallback 없음).
 CRIU의 `--track-mem`과 동시에 사용할 수 있다.
 
+자식 프로세스(descendant)를 자동으로 발견하고 추적하며, `--exclude-pid`로 특정 PID를 제외할 수 있다.
+
 기술적 상세 내용은 [HOT_PAGE_SKIP_DESIGN.md](../../../HOT_PAGE_SKIP_DESIGN.md)의
 "1.2 Dirty Page 수집 메커니즘" 섹션을 참조한다.
 
@@ -74,6 +76,8 @@ python3 experiments/dirty_track_only.py --workload matmul --duration 30 --dirty-
 | `--no-clear` | dirty bit clear 없이 누적 (WP 미사용) | false |
 | `-D, --dual-channel` | WP + soft-dirty 동시 수집 | false |
 | `-S, --sd-clear` | dual-channel에서 soft-dirty도 매 scan마다 clear | false |
+| `-C, --no-track-children` | 자식 프로세스 추적 비활성화 | false (기본 추적) |
+| `-E, --exclude-pid PID` | 특정 PID 추적 제외 (반복 가능) | - |
 
 ## JSON 출력 형식
 
@@ -148,6 +152,47 @@ Sample 3: wp=  107 (delta), sd= 3986 (cumulative)
 |------|-----------------|
 | WP tracker 실행 전 | 7,359 |
 | WP tracker 5초 실행 후 | 7,359 (변화 없음) |
+
+## 자식 프로세스 추적
+
+기본적으로 root PID의 모든 descendant 프로세스를 자동 발견하고 추적한다.
+`/proc/{pid}/task/{tid}/children`을 재귀적으로 탐색하여 BFS로 발견한다.
+
+```bash
+# 기본: 자식 프로세스 포함 추적
+sudo ./dirty_tracker -p <PID> -d 10
+
+# 자식 추적 비활성화
+sudo ./dirty_tracker -p <PID> -d 10 --no-track-children
+
+# 특정 PID 제외
+sudo ./dirty_tracker -p <PID> -d 10 --exclude-pid 12345 --exclude-pid 12346
+```
+
+매 sample 수집 시:
+1. `discover_descendants()`로 새 자식 프로세스 발견
+2. 죽은 프로세스 제거 (`kill(pid, 0)` → `ESRCH`)
+3. 각 프로세스의 dirty page를 aggregate하여 하나의 sample에 기록
+
+JSON 출력의 `pids_tracked` 배열이 sample별로 추적된 PID를 포함하고,
+`summary.total_pids_seen`에 전체 추적 이력이 기록된다.
+
+## CRIU 호환성
+
+### uffd-wp Cleanup
+
+Tracker 종료 시 `cleanup_userfaultfd_wp_for_process()`가 자동 호출되어:
+1. 대상 프로세스에 ptrace로 재접근
+2. 모든 writable VMA에 대해 `UFFDIO_UNREGISTER` 실행
+3. 대상 프로세스 내의 userfaultfd fd를 `close()`
+4. 레지스터/명령어 복원 후 detach
+
+이를 통해 CRIU dump 전에 VM_UFFD_WP 플래그와 uffd fd가 정리된다.
+
+**주의사항:**
+- SIGTERM/SIGINT → `stop_flag` → main loop 탈출 → `tracker_cleanup()` → cleanup 정상 동작
+- SIGKILL로 tracker가 죽으면 cleanup 불가 → 대상 프로세스에 uffd fd와 VM_UFFD_WP이 남음
+- 대상 프로세스가 이미 종료된 경우 cleanup을 건너뛰고 정상 반환
 
 ## 요구사항
 
