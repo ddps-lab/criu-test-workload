@@ -369,6 +369,7 @@ def run_dataproc_workload(
     print(f"[DataProc] Starting streaming aggregation workload")
     print(f"[DataProc] Config: rows={num_rows}, cols={num_cols}, batch_size={batch_size}, duration={duration_str}")
     print(f"[DataProc] Working directory: {working_dir}")
+    os.makedirs(working_dir, exist_ok=True)
 
     # Initialize data source and aggregator
     source = DataSource(num_rows, num_cols, batch_size)

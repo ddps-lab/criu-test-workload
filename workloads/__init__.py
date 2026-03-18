@@ -8,11 +8,12 @@ Each workload consists of:
 Available workloads:
 - memory: Memory allocation workload (pure Python)
 - matmul: Matrix multiplication (NumPy)
-- redis: Redis server (real redis-server process)
+- redis: Redis server + optional YCSB benchmark
 - ml_training: ML training (PyTorch CPU)
-- jupyter: Jupyter notebook simulation
 - video: FFmpeg video processing (real ffmpeg process)
 - dataproc: Data processing (NumPy)
+- xgboost: XGBoost CPU training (tree-based ML)
+- memcached: Memcached server + YCSB benchmark
 """
 
 from .base_workload import BaseWorkload, WorkloadFactory
@@ -22,9 +23,11 @@ from .memory_workload import MemoryWorkload
 from .matmul_workload import MatMulWorkload
 from .redis_workload import RedisWorkload
 from .ml_training_workload import MLTrainingWorkload
-from .jupyter_workload import JupyterWorkload
 from .video_workload import VideoWorkload
 from .dataproc_workload import DataProcWorkload
+from .xgboost_workload import XGBoostWorkload
+from .memcached_workload import MemcachedWorkload
+from .sevenzip_workload import SevenZipWorkload
 
 __all__ = [
     'BaseWorkload',
@@ -33,7 +36,9 @@ __all__ = [
     'MatMulWorkload',
     'RedisWorkload',
     'MLTrainingWorkload',
-    'JupyterWorkload',
     'VideoWorkload',
     'DataProcWorkload',
+    'XGBoostWorkload',
+    'MemcachedWorkload',
+    'SevenZipWorkload',
 ]

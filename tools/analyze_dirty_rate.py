@@ -277,6 +277,44 @@ def analyze_vma_distribution(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def analyze_process_memory(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Analyze process memory usage (RSS, writable VMA) from sample data.
+
+    Returns memory statistics extracted from per-sample rss_bytes and writable_vma_bytes.
+    """
+    samples = data.get('samples', [])
+    if not samples:
+        return {}
+
+    rss_values = [s['rss_bytes'] for s in samples if s.get('rss_bytes')]
+    vma_values = [s['writable_vma_bytes'] for s in samples if s.get('writable_vma_bytes')]
+
+    result = {}
+
+    if rss_values:
+        result['rss_avg_mb'] = round(sum(rss_values) / len(rss_values) / (1024 * 1024), 1)
+        result['rss_max_mb'] = round(max(rss_values) / (1024 * 1024), 1)
+        result['rss_min_mb'] = round(min(rss_values) / (1024 * 1024), 1)
+
+    if vma_values:
+        result['writable_vma_avg_mb'] = round(sum(vma_values) / len(vma_values) / (1024 * 1024), 1)
+        result['writable_vma_max_mb'] = round(max(vma_values) / (1024 * 1024), 1)
+
+    # Dirty-to-RSS ratio: how much of RSS is dirty per interval
+    summary = data.get('summary', {})
+    avg_rate = summary.get('avg_dirty_rate_per_sec', 0)
+    interval_ms = summary.get('interval_ms', 100)
+    page_size = data.get('page_size', 4096)
+    if rss_values and avg_rate > 0:
+        avg_dirty_per_interval = avg_rate * (interval_ms / 1000) * page_size
+        avg_rss = sum(rss_values) / len(rss_values)
+        if avg_rss > 0:
+            result['dirty_to_rss_ratio'] = round(avg_dirty_per_interval / avg_rss, 4)
+
+    return result
+
+
 def generate_analysis_report(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate comprehensive dirty rate analysis report.
@@ -284,6 +322,7 @@ def generate_analysis_report(data: Dict[str, Any]) -> Dict[str, Any]:
     Returns report with:
     - Pattern analysis
     - VMA distribution
+    - Process memory usage (RSS, writable VMA)
     - Pre-dump recommendations
     - Simulation parameters
     """
@@ -300,11 +339,16 @@ def generate_analysis_report(data: Dict[str, Any]) -> Dict[str, Any]:
     # VMA analysis
     vma_analysis = analyze_vma_distribution(data)
 
+    # Process memory analysis
+    memory_analysis = analyze_process_memory(data)
+
     # Build report
     report = {
         'workload': data.get('workload', 'unknown'),
         'pid': data.get('root_pid', data.get('pid', 0)),
         'tracking_duration_ms': data.get('tracking_duration_ms', 0),
+
+        'process_memory': memory_analysis,
 
         'dirty_rate_analysis': {
             'pattern_type': pattern['type'],
@@ -357,6 +401,18 @@ def print_analysis_summary(report: Dict[str, Any]):
     print(f"\nWorkload: {report['workload']}")
     print(f"PID: {report['pid']}")
     print(f"Duration: {report['tracking_duration_ms']:.1f} ms")
+
+    # Process memory
+    mem = report.get('process_memory', {})
+    if mem:
+        print("\n--- Process Memory ---")
+        if 'rss_avg_mb' in mem:
+            print(f"  RSS (avg / max): {mem['rss_avg_mb']} / {mem['rss_max_mb']} MB")
+        if 'writable_vma_avg_mb' in mem:
+            print(f"  Writable VMA (avg): {mem['writable_vma_avg_mb']} MB")
+        if 'dirty_to_rss_ratio' in mem:
+            ratio = mem['dirty_to_rss_ratio']
+            print(f"  Dirty/RSS ratio: {ratio:.4f} ({ratio*100:.2f}% of RSS dirty per interval)")
 
     print("\n--- Rate Analysis ---")
     rate_analysis = report['dirty_rate_analysis']

@@ -259,6 +259,7 @@ def run_video_workload(
     print(f"[Video] FFmpeg: {get_ffmpeg_version()}")
     print(f"[Video] Config: resolution={resolution}, fps={fps}, duration={duration}s, mode={mode}")
     print(f"[Video] Working directory: {working_dir}")
+    os.makedirs(working_dir, exist_ok=True)
 
     # Create output directory
     output_dir = os.path.join(working_dir, 'video_output')

@@ -6,12 +6,21 @@ This script manages a Redis server process for CRIU checkpoint testing.
 CRIU checkpoints this wrapper script, and with --tree option, redis-server
 (child process) is also checkpointed together.
 
+Supports two load generation modes:
+  1. Built-in: Simple mixed read/write operations (default, no external deps)
+  2. YCSB: Standard Yahoo Cloud Serving Benchmark with Zipfian distribution
+     (requires YCSB Java binary at --ycsb-home)
+
 Usage:
+    # Built-in mode (backward compatible)
     python3 redis_standalone.py --redis-port 6379 --num-keys 100000
+
+    # YCSB mode (standard benchmark)
+    python3 redis_standalone.py --ycsb-workload a --ycsb-home /opt/ycsb --record-count 100000
 
 Checkpoint Protocol:
     1. This script starts redis-server as child process
-    2. Populates data
+    2. Populates data (built-in pipeline or YCSB load phase)
     3. Creates 'checkpoint_ready' file with THIS script's PID (wrapper)
     4. CRIU with --tree option checkpoints: wrapper + redis-server
     5. After restore, both processes resume together
@@ -19,12 +28,13 @@ Checkpoint Protocol:
 Important:
     - CRIU checkpoints THIS script's PID with --tree option
     - redis-server is automatically included as child process
-    - No need to track redis-server PID separately
+    - YCSB Java client is NOT checkpoint target (load generator only)
 
 Scenario:
     - Redis caching layers
     - Session stores
     - Real-time data caches
+    - YCSB benchmark comparison (HeatSnap, OoH)
 """
 
 import time
@@ -34,6 +44,8 @@ import argparse
 import random
 import hashlib
 import subprocess
+import signal
+import tempfile
 
 try:
     import redis
@@ -124,6 +136,215 @@ def check_restore_complete(working_dir: str) -> bool:
     """Check if restore is complete (checkpoint_flag removed)."""
     flag_path = os.path.join(working_dir, 'checkpoint_flag')
     return not os.path.exists(flag_path)
+
+
+def check_ycsb_installed(ycsb_home: str) -> bool:
+    """Check if YCSB binary is available."""
+    ycsb_bin = os.path.join(ycsb_home, 'bin', 'ycsb')
+    if not os.path.exists(ycsb_bin):
+        ycsb_sh = os.path.join(ycsb_home, 'bin', 'ycsb.sh')
+        return os.path.exists(ycsb_sh)
+    return True
+
+
+def get_ycsb_bin(ycsb_home: str) -> str:
+    """Get the YCSB binary path."""
+    ycsb_bin = os.path.join(ycsb_home, 'bin', 'ycsb')
+    if os.path.exists(ycsb_bin):
+        return ycsb_bin
+    ycsb_sh = os.path.join(ycsb_home, 'bin', 'ycsb.sh')
+    if os.path.exists(ycsb_sh):
+        return ycsb_sh
+    return ycsb_bin  # will fail with clear error
+
+
+def create_ycsb_properties(
+    working_dir: str,
+    ycsb_workload: str,
+    redis_port: int,
+    record_count: int,
+    duration: int,
+    ycsb_threads: int,
+    target_throughput: int,
+) -> str:
+    """Create YCSB workload properties file.
+
+    Returns path to the properties file.
+    """
+    # Map single-letter workload names to YCSB workload classes
+    workload_map = {
+        'a': 'site.ycsb.workloads.CoreWorkload',
+        'b': 'site.ycsb.workloads.CoreWorkload',
+        'c': 'site.ycsb.workloads.CoreWorkload',
+        'd': 'site.ycsb.workloads.CoreWorkload',
+        'e': 'site.ycsb.workloads.CoreWorkload',
+        'f': 'site.ycsb.workloads.CoreWorkload',
+    }
+
+    # Workload-specific proportions
+    # A: 50/50 read/update (Update heavy)
+    # B: 95/5 read/update (Read mostly)
+    # C: 100% read (Read only)
+    # D: 95/5 read/insert (Read latest)
+    # E: 95/5 scan/insert (Short ranges)
+    # F: 50/50 read/read-modify-write
+    proportions = {
+        'a': 'readproportion=0.5\nupdateproportion=0.5\nscanproportion=0\ninsertproportion=0',
+        'b': 'readproportion=0.95\nupdateproportion=0.05\nscanproportion=0\ninsertproportion=0',
+        'c': 'readproportion=1.0\nupdateproportion=0\nscanproportion=0\ninsertproportion=0',
+        'd': 'readproportion=0.95\nupdateproportion=0\nscanproportion=0\ninsertproportion=0.05',
+        'e': 'readproportion=0\nupdateproportion=0\nscanproportion=0.95\ninsertproportion=0.05\nmaxscanlength=100',
+        'f': 'readproportion=0.5\nupdateproportion=0\nscanproportion=0\ninsertproportion=0\nreadmodifywriteproportion=0.5',
+    }
+
+    props = f"""workload={workload_map[ycsb_workload]}
+recordcount={record_count}
+operationcount=2147483647
+maxexecutiontime={duration}
+requestdistribution=zipfian
+fieldcount=10
+fieldlength=100
+redis.host=localhost
+redis.port={redis_port}
+{proportions[ycsb_workload]}
+"""
+
+    props_path = os.path.join(working_dir, f'ycsb_workload_{ycsb_workload}.properties')
+    with open(props_path, 'w') as f:
+        f.write(props)
+
+    print(f"[Redis] YCSB properties written to {props_path}")
+    return props_path
+
+
+def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
+                   ycsb_threads: int, target_throughput: int) -> subprocess.Popen:
+    """Run a YCSB phase (load or run).
+
+    Returns the subprocess.Popen object. YCSB client is NOT started with
+    setsid — it is a load generator, NOT a checkpoint target.
+    """
+    ycsb_bin = get_ycsb_bin(ycsb_home)
+    cmd = [
+        ycsb_bin, phase, 'redis', '-s',
+        '-P', props_path,
+        '-threads', str(ycsb_threads),
+    ]
+    if target_throughput > 0:
+        cmd.extend(['-target', str(target_throughput)])
+
+    print(f"[Redis] YCSB {phase}: {' '.join(cmd)}")
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return process
+
+
+def run_ycsb_operations(
+    ycsb_home: str,
+    ycsb_workload: str,
+    redis_port: int,
+    record_count: int,
+    duration: int,
+    ycsb_threads: int,
+    target_throughput: int,
+    working_dir: str,
+):
+    """Run YCSB load and run phases.
+
+    1. YCSB load phase: populate data
+    2. Signal checkpoint ready
+    3. YCSB run phase: generate load until duration or restore
+    4. Monitor for checkpoint_flag removal (restore complete)
+
+    Returns dict with results.
+    """
+    props_path = create_ycsb_properties(
+        working_dir, ycsb_workload, redis_port,
+        record_count, duration, ycsb_threads, target_throughput,
+    )
+
+    # YCSB load phase
+    print(f"[Redis] Starting YCSB load phase (recordcount={record_count})...")
+    load_proc = run_ycsb_phase(ycsb_home, 'load', props_path, ycsb_threads, 0)
+    load_stdout, load_stderr = load_proc.communicate(timeout=600)
+
+    if load_proc.returncode != 0:
+        print(f"[Redis] ERROR: YCSB load failed (exit={load_proc.returncode})")
+        stderr_text = load_stderr.decode('utf-8', errors='replace')
+        for line in stderr_text.strip().split('\n')[-10:]:
+            print(f"[Redis]   {line}")
+        sys.exit(1)
+
+    # Parse load phase throughput
+    load_output = load_stdout.decode('utf-8', errors='replace')
+    for line in load_output.split('\n'):
+        if '[OVERALL], Throughput' in line:
+            print(f"[Redis] YCSB load: {line.strip()}")
+            break
+
+    return props_path
+
+
+def monitor_ycsb_run(
+    ycsb_home: str,
+    props_path: str,
+    ycsb_threads: int,
+    target_throughput: int,
+    duration: int,
+    working_dir: str,
+) -> dict:
+    """Start YCSB run phase and monitor for restore.
+
+    Returns result dict.
+    """
+    print(f"[Redis] Starting YCSB run phase...")
+    run_proc = run_ycsb_phase(ycsb_home, 'run', props_path, ycsb_threads, target_throughput)
+
+    start_time = time.time()
+    last_report_time = start_time
+    ycsb_finished = False
+
+    while True:
+        # Check restore
+        if check_restore_complete(working_dir):
+            print(f"[Redis] Restore detected during YCSB run phase")
+            # Kill YCSB client if still running (it's not checkpointed)
+            if run_proc.poll() is None:
+                try:
+                    run_proc.terminate()
+                    run_proc.wait(timeout=5)
+                except Exception:
+                    run_proc.kill()
+            elapsed = time.time() - start_time
+            return {
+                'restored': True,
+                'mode': 'ycsb',
+                'elapsed': elapsed,
+                'ycsb_finished': ycsb_finished,
+            }
+
+        # Check if YCSB run finished naturally
+        if run_proc.poll() is not None and not ycsb_finished:
+            ycsb_finished = True
+            stdout_data = run_proc.stdout.read().decode('utf-8', errors='replace')
+            for line in stdout_data.split('\n'):
+                if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
+                    print(f"[Redis] YCSB: {line.strip()}")
+            print(f"[Redis] YCSB run phase finished (exit={run_proc.returncode})")
+            # Keep waiting for checkpoint_flag removal
+
+        current_time = time.time()
+        if current_time - last_report_time >= 5.0:
+            elapsed = current_time - start_time
+            status = "running" if not ycsb_finished else "finished (waiting for checkpoint)"
+            print(f"[Redis] YCSB {status}, elapsed={elapsed:.0f}s")
+            last_report_time = current_time
+
+        time.sleep(1)
 
 
 def run_continuous_operations(client, num_keys, value_size, duration, working_dir):
@@ -246,32 +467,57 @@ def run_redis_workload(
     num_keys: int = 100000,
     value_size: int = 1024,
     duration: int = 0,
-    working_dir: str = '.'
+    working_dir: str = '.',
+    ycsb_workload: str = None,
+    ycsb_home: str = '/opt/ycsb',
+    record_count: int = 100000,
+    ycsb_threads: int = 1,
+    target_throughput: int = 0,
 ):
     """
     Main Redis workload.
 
     Args:
         redis_port: Redis server port
-        num_keys: Number of keys to populate
-        value_size: Size of each value in bytes
+        num_keys: Number of keys to populate (built-in mode)
+        value_size: Size of each value in bytes (built-in mode)
         duration: Duration for continuous operations (0 = populate only)
         working_dir: Working directory for signal files
+        ycsb_workload: YCSB workload type (a-f), None for built-in mode
+        ycsb_home: Path to YCSB installation
+        record_count: Number of records for YCSB
+        ycsb_threads: Number of YCSB client threads
+        target_throughput: YCSB target ops/sec (0 = unlimited)
     """
-    if not HAS_REDIS:
-        print("[Redis] ERROR: redis-py not installed. Run: pip install redis")
-        sys.exit(1)
+    use_ycsb = ycsb_workload is not None
 
-    print(f"[Redis] Starting Redis workload")
+    if use_ycsb:
+        # YCSB mode: only need redis-server, YCSB handles data
+        if not check_ycsb_installed(ycsb_home):
+            print(f"[Redis] ERROR: YCSB not found at {ycsb_home}")
+            print(f"[Redis] Install YCSB: curl -O --location https://github.com/brianfrankcooper/YCSB/releases/download/0.17.0/ycsb-0.17.0.tar.gz")
+            print(f"[Redis] Then: tar xfvz ycsb-0.17.0.tar.gz && mv ycsb-0.17.0 /opt/ycsb")
+            sys.exit(1)
+    else:
+        if not HAS_REDIS:
+            print("[Redis] ERROR: redis-py not installed. Run: pip install redis")
+            sys.exit(1)
+
+    mode_str = f"YCSB workload {ycsb_workload.upper()}" if use_ycsb else "built-in"
     duration_str = f"{duration}s" if duration > 0 else "populate only"
-    print(f"[Redis] Config: port={redis_port}, keys={num_keys}, value_size={value_size}B, duration={duration_str}")
+    print(f"[Redis] Starting Redis workload (mode={mode_str})")
+    if use_ycsb:
+        print(f"[Redis] Config: port={redis_port}, ycsb={ycsb_workload}, records={record_count}, "
+              f"threads={ycsb_threads}, target={target_throughput} ops/s, duration={duration_str}")
+    else:
+        print(f"[Redis] Config: port={redis_port}, keys={num_keys}, value_size={value_size}B, duration={duration_str}")
     print(f"[Redis] Working directory: {working_dir}")
+    os.makedirs(working_dir, exist_ok=True)
 
     # Start Redis server
     print(f"[Redis] Starting redis-server...")
     redis_process = start_redis_server(redis_port, working_dir)
     redis_pid = redis_process.pid
-
     print(f"[Redis] Redis server started with PID: {redis_pid}")
 
     # Wait for Redis to be ready
@@ -280,108 +526,186 @@ def run_redis_workload(
         redis_process.terminate()
         sys.exit(1)
 
-    # Connect to Redis
-    client = redis.Redis(host='localhost', port=redis_port)
-    print(f"[Redis] Connected to Redis")
+    # Connect to Redis (needed for both modes for status checks)
+    client = redis.Redis(host='localhost', port=redis_port) if HAS_REDIS else None
 
-    # Flush and populate data
-    print(f"[Redis] Flushing database...")
-    client.flushdb()
+    if use_ycsb:
+        # === YCSB Mode ===
+        # YCSB load phase populates data
+        props_path = run_ycsb_operations(
+            ycsb_home, ycsb_workload, redis_port, record_count,
+            duration, ycsb_threads, target_throughput, working_dir,
+        )
 
-    print(f"[Redis] Populating {num_keys} keys...")
-    pipeline = client.pipeline()
-    batch_size = 1000
-
-    for i in range(num_keys):
-        key = f"key:{i:08d}"
-        value = generate_value(value_size, i)
-        pipeline.set(key, value)
-
-        if (i + 1) % batch_size == 0:
-            pipeline.execute()
-            pipeline = client.pipeline()
-
-        if (i + 1) % 10000 == 0:
-            print(f"[Redis] Populated {i + 1}/{num_keys} keys...")
-
-    pipeline.execute()
-
-    # Get initial checksum
-    initial_checksum = compute_checksum(client, num_keys)
-    info = client.info('memory')
-    memory_mb = info.get('used_memory', 0) / (1024 * 1024)
-
-    print(f"[Redis] Population complete")
-    print(f"[Redis] Memory usage: {memory_mb:.2f} MB")
-    print(f"[Redis] Keys in DB: {client.dbsize()}")
-    print(f"[Redis] Initial checksum: {initial_checksum[:16]}...")
-
-    # Signal ready - with WRAPPER PID (this script)
-    wrapper_pid = os.getpid()
-    create_ready_signal(working_dir, wrapper_pid, redis_pid)
-
-    print(f"[Redis]")
-    print(f"[Redis] ====== READY FOR CHECKPOINT ======")
-    print(f"[Redis] Wrapper PID: {wrapper_pid} (checkpoint this)")
-    print(f"[Redis] Redis PID: {redis_pid} (child process)")
-    print(f"[Redis] To checkpoint: sudo criu dump -t {wrapper_pid} --tree -D <dir> --shell-job --tcp-established")
-    print(f"[Redis] ===================================")
-    print(f"[Redis]")
-
-    # Continuous operations phase
-    print(f"[Redis] Starting continuous operations (duration={duration_str})...")
-    try:
-        result = run_continuous_operations(client, num_keys, value_size, duration, working_dir)
-
-        if result['restored']:
-            print(f"[Redis] Restore detected - checkpoint_flag removed")
-
-            # Reconnect
+        # Get memory stats after load
+        if client:
             try:
-                client = redis.Redis(host='localhost', port=redis_port)
-                client.ping()
-            except Exception:
-                print(f"[Redis] Waiting for Redis to be available...")
-                if not wait_for_redis('localhost', redis_port, timeout=30):
-                    print(f"[Redis] ERROR: Cannot connect to Redis after restore")
-                    return
-                client = redis.Redis(host='localhost', port=redis_port)
-
-            try:
-                total_keys = client.dbsize()
                 info = client.info('memory')
-                mem_mb = info.get('used_memory', 0) / (1024 * 1024)
+                memory_mb = info.get('used_memory', 0) / (1024 * 1024)
+                total_keys = client.dbsize()
+                print(f"[Redis] After YCSB load: {total_keys} keys, {memory_mb:.2f} MB")
             except Exception:
-                total_keys = 0
-                mem_mb = 0
+                pass
 
-            print(f"[Redis] === STATE SUMMARY (lost on restart) ===")
-            print(f"[Redis]   Total operations: {result['ops_count']}")
-            print(f"[Redis]   Extra key writes: {result['extra_keys_written']} (live: {result['extra_keys_live']})")
-            print(f"[Redis]   Updates to existing keys: {result['updates_to_existing']}")
-            print(f"[Redis]   Transaction log entries: {result['tx_log_entries']}")
-            print(f"[Redis]   Sorted set operations: {result['sorted_set_members']}")
-            print(f"[Redis]   Current keys in DB: {total_keys}")
-            print(f"[Redis]   Redis memory: {mem_mb:.1f} MB")
-            print(f"[Redis]   Elapsed time: {result['elapsed']:.1f}s")
-            print(f"[Redis]   ALL live data state LOST on restart (values, rankings, tx log)")
-            print(f"[Redis] ==========================================")
+        # Signal ready
+        wrapper_pid = os.getpid()
+        create_ready_signal(working_dir, wrapper_pid, redis_pid)
 
-    except KeyboardInterrupt:
-        print(f"[Redis] Interrupted")
+        print(f"[Redis]")
+        print(f"[Redis] ====== READY FOR CHECKPOINT ======")
+        print(f"[Redis] Wrapper PID: {wrapper_pid} (checkpoint this)")
+        print(f"[Redis] Redis PID: {redis_pid} (child, included via --tree)")
+        print(f"[Redis] YCSB client: NOT checkpointed (load generator)")
+        print(f"[Redis] To checkpoint: sudo criu dump -t {wrapper_pid} --tree -D <dir> --shell-job --tcp-established")
+        print(f"[Redis] ===================================")
+        print(f"[Redis]")
 
-    finally:
-        # Clean shutdown
-        print(f"[Redis] Shutting down Redis server...")
+        # YCSB run phase + monitor for restore
         try:
-            client.shutdown(nosave=True)
-        except Exception:
-            pass
-        redis_process.terminate()
+            result = monitor_ycsb_run(
+                ycsb_home, props_path, ycsb_threads,
+                target_throughput, duration, working_dir,
+            )
+
+            if result.get('restored'):
+                print(f"[Redis] Restore detected - checkpoint_flag removed")
+                if client:
+                    try:
+                        client = redis.Redis(host='localhost', port=redis_port)
+                        client.ping()
+                    except Exception:
+                        if not wait_for_redis('localhost', redis_port, timeout=30):
+                            print(f"[Redis] ERROR: Cannot connect to Redis after restore")
+                            return
+                        client = redis.Redis(host='localhost', port=redis_port)
+
+                    try:
+                        total_keys = client.dbsize()
+                        info = client.info('memory')
+                        mem_mb = info.get('used_memory', 0) / (1024 * 1024)
+                    except Exception:
+                        total_keys = 0
+                        mem_mb = 0
+
+                    print(f"[Redis] === STATE SUMMARY (lost on restart) ===")
+                    print(f"[Redis]   Mode: YCSB workload {ycsb_workload.upper()}")
+                    print(f"[Redis]   Current keys in DB: {total_keys}")
+                    print(f"[Redis]   Redis memory: {mem_mb:.1f} MB")
+                    print(f"[Redis]   Elapsed time: {result['elapsed']:.1f}s")
+                    print(f"[Redis]   ALL live data state LOST on restart")
+                    print(f"[Redis] ==========================================")
+
+        except KeyboardInterrupt:
+            print(f"[Redis] Interrupted")
+
+        finally:
+            print(f"[Redis] Shutting down Redis server...")
+            try:
+                if client:
+                    client.shutdown(nosave=True)
+            except Exception:
+                pass
+            redis_process.terminate()
+            try:
+                redis_process.wait(timeout=5)
+            except Exception:
+                redis_process.kill()
+
+    else:
+        # === Built-in Mode (backward compatible) ===
+        print(f"[Redis] Connected to Redis")
+
+        client.flushdb()
+
+        print(f"[Redis] Populating {num_keys} keys...")
+        pipeline = client.pipeline()
+        batch_size = 1000
+
+        for i in range(num_keys):
+            key = f"key:{i:08d}"
+            value = generate_value(value_size, i)
+            pipeline.set(key, value)
+
+            if (i + 1) % batch_size == 0:
+                pipeline.execute()
+                pipeline = client.pipeline()
+
+            if (i + 1) % 10000 == 0:
+                print(f"[Redis] Populated {i + 1}/{num_keys} keys...")
+
+        pipeline.execute()
+
+        initial_checksum = compute_checksum(client, num_keys)
+        info = client.info('memory')
+        memory_mb = info.get('used_memory', 0) / (1024 * 1024)
+
+        print(f"[Redis] Population complete")
+        print(f"[Redis] Memory usage: {memory_mb:.2f} MB")
+        print(f"[Redis] Keys in DB: {client.dbsize()}")
+        print(f"[Redis] Initial checksum: {initial_checksum[:16]}...")
+
+        wrapper_pid = os.getpid()
+        create_ready_signal(working_dir, wrapper_pid, redis_pid)
+
+        print(f"[Redis]")
+        print(f"[Redis] ====== READY FOR CHECKPOINT ======")
+        print(f"[Redis] Wrapper PID: {wrapper_pid} (checkpoint this)")
+        print(f"[Redis] Redis PID: {redis_pid} (child process)")
+        print(f"[Redis] To checkpoint: sudo criu dump -t {wrapper_pid} --tree -D <dir> --shell-job --tcp-established")
+        print(f"[Redis] ===================================")
+        print(f"[Redis]")
+
+        print(f"[Redis] Starting continuous operations (duration={duration_str})...")
         try:
-            redis_process.wait(timeout=5)
-        except Exception:
-            redis_process.kill()
+            result = run_continuous_operations(client, num_keys, value_size, duration, working_dir)
+
+            if result['restored']:
+                print(f"[Redis] Restore detected - checkpoint_flag removed")
+
+                try:
+                    client = redis.Redis(host='localhost', port=redis_port)
+                    client.ping()
+                except Exception:
+                    print(f"[Redis] Waiting for Redis to be available...")
+                    if not wait_for_redis('localhost', redis_port, timeout=30):
+                        print(f"[Redis] ERROR: Cannot connect to Redis after restore")
+                        return
+                    client = redis.Redis(host='localhost', port=redis_port)
+
+                try:
+                    total_keys = client.dbsize()
+                    info = client.info('memory')
+                    mem_mb = info.get('used_memory', 0) / (1024 * 1024)
+                except Exception:
+                    total_keys = 0
+                    mem_mb = 0
+
+                print(f"[Redis] === STATE SUMMARY (lost on restart) ===")
+                print(f"[Redis]   Total operations: {result['ops_count']}")
+                print(f"[Redis]   Extra key writes: {result['extra_keys_written']} (live: {result['extra_keys_live']})")
+                print(f"[Redis]   Updates to existing keys: {result['updates_to_existing']}")
+                print(f"[Redis]   Transaction log entries: {result['tx_log_entries']}")
+                print(f"[Redis]   Sorted set operations: {result['sorted_set_members']}")
+                print(f"[Redis]   Current keys in DB: {total_keys}")
+                print(f"[Redis]   Redis memory: {mem_mb:.1f} MB")
+                print(f"[Redis]   Elapsed time: {result['elapsed']:.1f}s")
+                print(f"[Redis]   ALL live data state LOST on restart (values, rankings, tx log)")
+                print(f"[Redis] ==========================================")
+
+        except KeyboardInterrupt:
+            print(f"[Redis] Interrupted")
+
+        finally:
+            print(f"[Redis] Shutting down Redis server...")
+            try:
+                client.shutdown(nosave=True)
+            except Exception:
+                pass
+            redis_process.terminate()
+            try:
+                redis_process.wait(timeout=5)
+            except Exception:
+                redis_process.kill()
 
     sys.exit(0)
 
@@ -400,13 +724,13 @@ def main():
         '--num-keys',
         type=int,
         default=100000,
-        help='Number of keys to populate (default: 100000)'
+        help='Number of keys to populate in built-in mode (default: 100000)'
     )
     parser.add_argument(
         '--value-size',
         type=int,
         default=1024,
-        help='Size of each value in bytes (default: 1024)'
+        help='Size of each value in bytes in built-in mode (default: 1024)'
     )
     parser.add_argument(
         '--duration',
@@ -420,6 +744,38 @@ def main():
         default='.',
         help='Working directory for signal files'
     )
+    # YCSB options
+    parser.add_argument(
+        '--ycsb-workload',
+        type=str,
+        choices=['a', 'b', 'c', 'd', 'e', 'f'],
+        default=None,
+        help='YCSB workload type (a-f). If set, uses YCSB Java binary instead of built-in ops'
+    )
+    parser.add_argument(
+        '--ycsb-home',
+        type=str,
+        default='/opt/ycsb',
+        help='Path to YCSB installation (default: /opt/ycsb)'
+    )
+    parser.add_argument(
+        '--record-count',
+        type=int,
+        default=100000,
+        help='Number of records for YCSB (default: 100000)'
+    )
+    parser.add_argument(
+        '--ycsb-threads',
+        type=int,
+        default=1,
+        help='Number of YCSB client threads (default: 1)'
+    )
+    parser.add_argument(
+        '--target-throughput',
+        type=int,
+        default=0,
+        help='YCSB target throughput in ops/sec (0 = unlimited, default: 0)'
+    )
 
     args = parser.parse_args()
 
@@ -428,7 +784,12 @@ def main():
         num_keys=args.num_keys,
         value_size=args.value_size,
         duration=args.duration,
-        working_dir=args.working_dir
+        working_dir=args.working_dir,
+        ycsb_workload=args.ycsb_workload,
+        ycsb_home=args.ycsb_home,
+        record_count=args.record_count,
+        ycsb_threads=args.ycsb_threads,
+        target_throughput=args.target_throughput,
     )
 
 

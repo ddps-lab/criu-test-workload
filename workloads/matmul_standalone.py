@@ -76,6 +76,7 @@ def run_matmul_workload(
     print(f"[MatMul] Starting Power Iteration eigenvalue solver")
     print(f"[MatMul] Config: matrix_size={matrix_size}x{matrix_size}, iterations={iterations or 'infinite'}, duration={duration_str}")
     print(f"[MatMul] Working directory: {working_dir}")
+    os.makedirs(working_dir, exist_ok=True)
 
     # Initialize symmetric matrix (ensures real eigenvalues)
     print(f"[MatMul] Initializing symmetric matrix...")

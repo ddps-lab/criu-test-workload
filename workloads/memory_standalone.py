@@ -6,7 +6,7 @@ This script runs on workload nodes and progressively allocates memory.
 It is designed to be checkpointed by CRIU during execution.
 
 Usage:
-    python3 memory_standalone.py --mb_size 256 --interval 5 --max_memory_mb 8192
+    python3 memory_standalone.py --mb-size 256 --interval 5 --max-memory-mb 8192 --duration 300
 
 Checkpoint Protocol:
     1. Script creates 'checkpoint_ready' file when ready for checkpointing
@@ -14,7 +14,7 @@ Checkpoint Protocol:
     3. When checkpoint_flag is removed, script exits gracefully
 
 Lazy Loading Test:
-    When --check_lazy_loading is True, after restore the script will
+    When --check-lazy-loading is True, after restore the script will
     touch every page to trigger page faults for lazy-pages testing.
 """
 
@@ -61,6 +61,7 @@ def run_memory_workload(
     mb_size: int = 256,
     interval: float = 5.0,
     max_memory_mb: int = 8192,
+    duration: int = 0,
     check_lazy_loading: bool = False,
     working_dir: str = '.'
 ):
@@ -71,6 +72,7 @@ def run_memory_workload(
         mb_size: Size of each memory block in MB
         interval: Interval between allocations in seconds
         max_memory_mb: Maximum total memory to allocate in MB
+        duration: Duration in seconds (0 = run until max_memory reached)
         check_lazy_loading: Whether to trigger page faults after restore
         working_dir: Working directory for signal files
     """
@@ -78,23 +80,41 @@ def run_memory_workload(
     memory_blocks = []
     iteration = 0
 
+    duration_str = f"{duration}s" if duration > 0 else f"until {max_memory_mb}MB"
     print(f"[Memory] Starting memory workload")
-    print(f"[Memory] Config: block_size={mb_size}MB, interval={interval}s, max={max_memory_mb}MB")
+    print(f"[Memory] Config: block_size={mb_size}MB, interval={interval}s, max={max_memory_mb}MB, duration={duration_str}")
     print(f"[Memory] Working directory: {working_dir}")
+    os.makedirs(working_dir, exist_ok=True)
 
     # Signal ready for checkpoint
     create_ready_signal(working_dir)
 
+    start_time = time.time()
+
     while True:
         # Check if restore completed (checkpoint_flag removed)
         if check_restore_complete(working_dir):
+            elapsed = time.time() - start_time
             print("[Memory] Restore detected - checkpoint_flag removed")
+            print(f"[Memory] === STATE SUMMARY (lost on restart) ===")
+            print(f"[Memory]   Allocated blocks: {len(memory_blocks)}")
+            print(f"[Memory]   Total memory: {current_memory} MB")
+            print(f"[Memory]   Elapsed time: {elapsed:.1f}s")
+            print(f"[Memory]   ALL allocated memory LOST on restart")
+            print(f"[Memory] ==========================================")
 
             if check_lazy_loading and memory_blocks:
                 trigger_lazy_page_faults(memory_blocks)
 
             print("[Memory] Workload complete, exiting")
             sys.exit(0)
+
+        # Duration check
+        if duration > 0:
+            elapsed = time.time() - start_time
+            if elapsed >= duration:
+                time.sleep(1)
+                continue
 
         # Check if we've reached max memory
         if current_memory >= max_memory_mb:
@@ -117,7 +137,7 @@ def main():
         description="Memory allocation workload for CRIU checkpoint testing"
     )
     parser.add_argument(
-        '--mb_size',
+        '--mb-size',
         type=int,
         default=256,
         help='Memory block size in MB (default: 256)'
@@ -129,13 +149,19 @@ def main():
         help='Interval between allocations in seconds (default: 5.0)'
     )
     parser.add_argument(
-        '--max_memory_mb',
+        '--max-memory-mb',
         type=int,
         default=8192,
         help='Maximum total memory to allocate in MB (default: 8192)'
     )
     parser.add_argument(
-        '--check_lazy_loading',
+        '--duration',
+        type=int,
+        default=0,
+        help='Duration in seconds (0 = run until max memory, default: 0)'
+    )
+    parser.add_argument(
+        '--check-lazy-loading',
         action='store_true',
         help='Trigger page faults after restore for lazy-pages testing'
     )
@@ -152,6 +178,7 @@ def main():
         mb_size=args.mb_size,
         interval=args.interval,
         max_memory_mb=args.max_memory_mb,
+        duration=args.duration,
         check_lazy_loading=args.check_lazy_loading,
         working_dir=args.working_dir
     )

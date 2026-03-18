@@ -332,8 +332,8 @@ class CheckpointManager:
         criu_cmd = f"sudo criu pre-dump -D {checkpoint_dir} -t {pid} --shell-job --track-mem"
         criu_cmd += f" --log-file {log_file} -v4"
 
-        # Redis needs --tcp-established for Python-Redis TCP connection
-        if workload_type == 'redis':
+        # Redis/Memcached need --tcp-established for TCP connections
+        if workload_type in ('redis', 'memcached'):
             criu_cmd += " --tcp-established"
 
         # Add --prev-images-dir for iterations after the first
@@ -421,8 +421,8 @@ class CheckpointManager:
             "--log-file", log_file, "-v4"
         ]
 
-        # Redis needs --tcp-established for Python-Redis TCP connection
-        if workload_type == 'redis':
+        # Redis/Memcached need --tcp-established for TCP connections
+        if workload_type in ('redis', 'memcached'):
             criu_cmd_parts.append("--tcp-established")
 
         # Add --prev-images-dir if there were pre-dumps
@@ -584,8 +584,8 @@ class CheckpointManager:
             "--log-file", restore_log_file, "-v4"
         ]
 
-        # Redis needs --tcp-established for Python-Redis TCP connection
-        if workload_type == 'redis':
+        # Redis/Memcached need --tcp-established for TCP connections
+        if workload_type in ('redis', 'memcached'):
             criu_cmd_parts.append("--tcp-established")
 
         if pid_file:
@@ -738,6 +738,25 @@ class CheckpointManager:
                 'error': stderr or 'No PONG response'
             }
 
+        elif workload_type == 'memcached':
+            # Check Memcached is responding via stats command
+            port = config.get('port', 11211)
+            stdout, stderr, status = client.execute(
+                f"echo 'stats' | nc -q1 localhost {port} 2>/dev/null | head -1",
+                timeout=10
+            )
+            if status == 0 and 'STAT' in stdout:
+                return {
+                    'healthy': True,
+                    'service': 'memcached',
+                    'response': stdout.strip()
+                }
+            return {
+                'healthy': False,
+                'service': 'memcached',
+                'error': stderr or 'No stats response'
+            }
+
         elif workload_type == 'video':
             # Check ffmpeg process is running
             stdout, stderr, status = client.execute(
@@ -791,8 +810,12 @@ class CheckpointManager:
         # Build process pattern based on workload type
         if workload_type == 'redis':
             pattern = 'redis-server'
+        elif workload_type == 'memcached':
+            pattern = 'memcached'
         elif workload_type == 'video':
             pattern = 'ffmpeg'
+        elif workload_type == '7zip':
+            pattern = '7z'
         else:
             pattern = f'{workload_type}_standalone.py'
 
@@ -1150,9 +1173,12 @@ class CheckpointManager:
             'memory': 'memory_standalone.py',
             'matmul': 'matmul_standalone.py',
             'redis': 'redis-server',
+            'memcached': 'memcached',
             'video': 'ffmpeg',
             'dataproc': 'dataproc_standalone.py',
             'ml_training': 'ml_training_standalone.py',
+            'xgboost': 'xgboost_standalone.py',
+            '7zip': 'sevenzip_standalone.py',
         }
 
         pattern = process_patterns.get(workload_type, workload_type)
@@ -1221,8 +1247,8 @@ class CheckpointManager:
         criu_cmd_parts = ["sudo", "criu", "restore", "-D", checkpoint_dir, "--shell-job", "-d"]
         criu_cmd_parts.extend(["--log-file", restore_log_file, "-v4"])
 
-        # Redis needs --tcp-established
-        if workload_type == 'redis':
+        # Redis/Memcached need --tcp-established for TCP connections
+        if workload_type in ('redis', 'memcached'):
             criu_cmd_parts.append("--tcp-established")
 
         if requires_lazy:

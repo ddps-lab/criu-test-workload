@@ -9,10 +9,13 @@ CRIU(Checkpoint/Restore In Userspace) 기반 라이브 마이그레이션 실험
 - [워크로드 시나리오](#워크로드-시나리오)
   - [1. 메모리 할당](#1-메모리-할당-워크로드)
   - [2. 행렬 곱셈](#2-행렬-곱셈-워크로드)
-  - [3. Redis 인메모리 DB](#3-redis-인메모리-데이터베이스-워크로드)
+  - [3. Redis 인메모리 DB (+YCSB)](#3-redis-인메모리-데이터베이스-워크로드)
   - [4. ML 학습 (PyTorch)](#4-ml-학습-워크로드-pytorch)
   - [5. 비디오 처리](#5-비디오-처리-워크로드)
   - [6. 데이터 처리 (Pandas 유사)](#6-데이터-처리-워크로드-pandas-유사)
+  - [7. XGBoost ML 학습](#7-xgboost-학습-워크로드)
+  - [8. Memcached (+YCSB)](#8-memcached-인메모리-캐시-워크로드)
+  - [9. 7zip 압축](#9-7zip-압축-워크로드)
 - [설정](#설정)
 - [체크포인트 전략](#체크포인트-전략)
 - [AWS Lab 연동](#aws-lab-연동)
@@ -326,33 +329,37 @@ python3 run_experiment.py --workload matmul --matrix-size 1024 --interval 0.5
 
 **명령어**:
 ```bash
-# 기본: 100K 키, 1KB 값
+# Built-in 모드: 100K 키, 1KB 값
 python3 run_experiment.py --workload redis
 
 # 대형 캐시 (1M 키, 4KB 값)
 python3 run_experiment.py --workload redis --num-keys 1000000 --value-size 4096
 
-# 커스텀 Redis 포트
-python3 run_experiment.py --workload redis --redis-port 6380 --num-keys 100000
+# YCSB 모드: Zipfian 분포 벤치마크 (HeatSnap 논문 비교용)
+python3 workloads/redis_standalone.py --redis-port 6379 --ycsb-workload a \
+  --ycsb-home /opt/ycsb --record-count 100000 --duration 300 --working_dir /tmp/redis
 ```
 
 **파라미터**:
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | `--redis-port` | 6379 | Redis 서버 포트 |
-| `--num-keys` | 100000 | 키 개수 |
-| `--value-size` | 1024 | 값 크기 (바이트) |
+| `--num-keys` | 100000 | 키 개수 (built-in 모드) |
+| `--value-size` | 1024 | 값 크기 (바이트, built-in 모드) |
+| `--ycsb-workload` | None | YCSB workload (a/b/c/d/e/f, 미지정 시 built-in) |
+| `--ycsb-home` | /opt/ycsb | YCSB 설치 경로 |
+| `--record-count` | 100000 | YCSB 레코드 수 |
 
 **메모리 사용량**: `~num_keys * (overhead + value_size)` + Redis 오버헤드
 
 **특징**:
 - 실제 redis-server 프로세스 사용 (TCP 소켓 포함)
-- 복원 후 데이터 무결성 검증 (체크섬 비교)
-- Python redis 클라이언트로 작업 수행
-- TCP 소켓을 통한 실제 네트워크 통신
-- CRIU --tcp-established 플래그 필요
+- Built-in 모드: Python redis 클라이언트로 혼합 작업 수행
+- YCSB 모드: Zipfian 분포 기반 표준 벤치마크 (Workload A-F)
+- CRIU `--tcp-established` 플래그 필요
+- YCSB 클라이언트는 checkpoint 대상이 아님 (load generator)
 
-**의존성**: `redis-server`, `redis` (Python 패키지)
+**의존성**: `redis-server`, `redis` (Python 패키지), YCSB + Java (YCSB 모드)
 
 ---
 
@@ -489,6 +496,99 @@ python3 run_experiment.py --workload dataproc --num-rows 100000 --interval 0.1
 **메모리 사용량**: `~num_rows * num_cols * 8 bytes`
 
 **의존성**: `numpy` (pandas는 선택사항)
+
+---
+
+### 7. XGBoost 학습 워크로드
+
+**시나리오**: CPU 기반 Gradient Boosted Tree 학습. Can't Be Late (NSDI 2024) 논문의 ML 워크로드 매칭.
+
+**사용 사례**:
+- Tree-based ML 학습 작업
+- Tabular 데이터 분류/회귀
+- Feature importance 분석
+- 기존 ml_training (PyTorch NN)과 다른 dirty page 패턴 비교
+
+**명령어**:
+```bash
+# Synthetic 데이터
+python3 workloads/xgboost_standalone.py --dataset synthetic --num-samples 100000 \
+  --num-features 50 --num-rounds 500 --duration 300 --working_dir /tmp/xgb
+
+# Covtype 실제 데이터셋
+python3 workloads/xgboost_standalone.py --dataset covtype --duration 300 --working_dir /tmp/xgb
+```
+
+**파라미터**:
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `--dataset` | synthetic | 데이터셋 (synthetic/covtype/higgs) |
+| `--num-samples` | 100000 | 샘플 수 (synthetic) |
+| `--num-features` | 50 | 피처 수 (synthetic) |
+| `--num-rounds` | 0 | 학습 라운드 (0=duration 기반) |
+| `--max-depth` | 6 | 트리 최대 깊이 |
+| `--seed` | 42 | 랜덤 시드 (재현성) |
+
+**의존성**: `xgboost`, `numpy`
+
+---
+
+### 8. Memcached 인메모리 캐시 워크로드
+
+**시나리오**: Memcached 서버 + YCSB 벤치마크. HeatSnap (WWW 2025) 논문 비교용.
+
+**사용 사례**:
+- 인메모리 캐시 서비스
+- Slab allocator 기반 dirty page 패턴 분석
+- Redis와 다른 메모리 관리 패턴 비교
+
+**명령어**:
+```bash
+python3 workloads/memcached_standalone.py --port 11211 --memory-mb 256 \
+  --ycsb-workload a --ycsb-home /opt/ycsb --record-count 100000 \
+  --duration 300 --working_dir /tmp/mc
+```
+
+**파라미터**:
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `--port` | 11211 | Memcached 포트 |
+| `--memory-mb` | 256 | 메모리 제한 (MB) |
+| `--ycsb-workload` | a | YCSB workload (a-f) |
+| `--ycsb-home` | /opt/ycsb | YCSB 설치 경로 |
+| `--record-count` | 100000 | 레코드 수 |
+
+**특징**:
+- CRIU `--tcp-established` 플래그 필요
+- YCSB 클라이언트는 checkpoint 대상이 아님
+
+**의존성**: `memcached` (시스템 패키지), YCSB + Java
+
+---
+
+### 9. 7zip 압축 워크로드
+
+**시나리오**: 7z 파일 압축. HeatSnap (WWW 2025) 논문 비교용.
+
+**사용 사례**:
+- 데이터 압축/아카이빙 작업
+- LZMA dictionary 기반 sliding window dirty page 패턴
+
+**명령어**:
+```bash
+python3 workloads/sevenzip_standalone.py --compression-level 9 --input-size-mb 256 \
+  --duration 300 --working_dir /tmp/7z
+```
+
+**파라미터**:
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `--compression-level` | 9 | 압축 레벨 (1-9) |
+| `--input-size-mb` | 256 | 입력 파일 크기 (MB) |
+| `--threads` | 1 | 압축 스레드 수 |
+| `--seed` | 42 | 입력 데이터 랜덤 시드 (재현성) |
+
+**의존성**: `p7zip-full` (시스템 패키지)
 
 ---
 
@@ -831,20 +931,23 @@ Total Experiment Duration: 95.67s
 | AWS | 120초 |
 | GCP | 30초 |
 
-7개의 워크로드는 데드라인 제약 하에서 마이그레이션 성능을 평가하기 위한 현실적인 클라우드 워크로드 시나리오를 대표합니다.
+9개의 워크로드는 데드라인 제약 하에서 마이그레이션 성능을 평가하기 위한 현실적인 클라우드 워크로드 시나리오를 대표합니다. HeatSnap (WWW 2025), Can't Be Late (NSDI 2024), YCSB 벤치마크와의 비교를 위해 표준 벤치마크 도구(YCSB, XGBoost)를 활용합니다.
 
 ---
 
 ## 워크로드 요약 테이블
 
-| 워크로드 | 시나리오 | 메모리 패턴 | 의존성 | 특징 |
-|----------|----------|-------------|--------|------|
-| `memory` | 메모리 할당 | 증가형 | 없음 | Pre-dump 효율성 테스트에 최적 |
-| `matmul` | HPC/과학 계산 | 정적 | numpy | CPU 집약적 계산 |
-| `redis` | 실제 Redis 서버 | 초기화 후 정적 | redis-server, redis | TCP 소켓, 실제 프로세스 |
-| `ml_training` | 딥러닝 학습 | 정적 | torch | GPU 사용 가능 |
-| `video` | 비디오 트랜스코딩 | 정적 | ffmpeg | 실제 ffmpeg 프로세스, live/file 모드 |
-| `dataproc` | ETL/배치 분석 | 초기화 후 정적 | numpy | Pandas/Spark 유사 작업 |
+| 워크로드 | 시나리오 | 메모리 패턴 | 의존성 | CRIU 플래그 |
+|----------|----------|-------------|--------|-------------|
+| `memory` | 메모리 할당 | 증가형 | 없음 | `--shell-job` |
+| `matmul` | HPC/과학 계산 | 정적 | numpy | `--shell-job` |
+| `redis` | 인메모리 DB (+YCSB) | 초기화 후 정적 | redis-server, redis, YCSB | `--shell-job --tcp-established` |
+| `ml_training` | 딥러닝 학습 | 정적 | torch | `--shell-job` |
+| `video` | 비디오 트랜스코딩 | 정적 | ffmpeg | `--shell-job` |
+| `dataproc` | ETL/배치 분석 | 초기화 후 정적 | numpy | `--shell-job` |
+| `xgboost` | Tree-based ML | 정적 (gradient dirty) | xgboost, numpy | `--shell-job` |
+| `memcached` | 인메모리 캐시 (+YCSB) | slab 할당 | memcached, YCSB | `--shell-job --tcp-established` |
+| `7zip` | 데이터 압축 | dictionary 기반 | p7zip-full | `--shell-job` |
 
 ---
 
@@ -937,7 +1040,7 @@ python3 experiments/dirty_track_only.py --workload matmul --duration 30 \
 python3 tools/analyze_dirty_rate.py -i dirty_matmul.json
 ```
 
-지원 워크로드: `memory`, `matmul`, `redis`, `ml_training`, `video`, `dataproc`, `jupyter`
+지원 워크로드: `memory`, `matmul`, `redis`, `ml_training`, `video`, `dataproc`, `xgboost`, `memcached`, `7zip`
 
 ### 출력 형식 (통합)
 

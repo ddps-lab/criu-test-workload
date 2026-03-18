@@ -51,7 +51,9 @@ STANDALONE_SCRIPTS = {
     'ml_training': 'workloads/ml_training_standalone.py',
     'video': 'workloads/video_standalone.py',
     'dataproc': 'workloads/dataproc_standalone.py',
-    'jupyter': 'workloads/jupyter_standalone.py',
+    'xgboost': 'workloads/xgboost_standalone.py',
+    'memcached': 'workloads/memcached_standalone.py',
+    '7zip': 'workloads/sevenzip_standalone.py',
 }
 
 
@@ -77,7 +79,7 @@ def build_workload_cmd(args, working_dir: str) -> list:
         if args.mb_size:
             cmd.extend(['--mb-size', str(args.mb_size)])
         if args.max_memory:
-            cmd.extend(['--max-memory', str(args.max_memory)])
+            cmd.extend(['--max-memory-mb', str(args.max_memory)])
         if args.interval:
             cmd.extend(['--interval', str(args.interval)])
 
@@ -89,11 +91,21 @@ def build_workload_cmd(args, working_dir: str) -> list:
 
     elif args.workload == 'redis':
         if args.redis_port:
-            cmd.extend(['--port', str(args.redis_port)])
+            cmd.extend(['--redis-port', str(args.redis_port)])
         if args.num_keys:
             cmd.extend(['--num-keys', str(args.num_keys)])
         if args.value_size:
             cmd.extend(['--value-size', str(args.value_size)])
+        if args.ycsb_workload:
+            cmd.extend(['--ycsb-workload', args.ycsb_workload])
+        if args.ycsb_home:
+            cmd.extend(['--ycsb-home', args.ycsb_home])
+        if args.record_count:
+            cmd.extend(['--record-count', str(args.record_count)])
+        if args.ycsb_threads:
+            cmd.extend(['--ycsb-threads', str(args.ycsb_threads)])
+        if args.target_throughput:
+            cmd.extend(['--target-throughput', str(args.target_throughput)])
 
     elif args.workload == 'ml_training':
         if args.model_size:
@@ -120,6 +132,50 @@ def build_workload_cmd(args, working_dir: str) -> list:
             cmd.extend(['--num-cols', str(args.num_cols)])
         if args.operations:
             cmd.extend(['--operations', str(args.operations)])
+
+    elif args.workload == 'xgboost':
+        if args.xgb_dataset:
+            cmd.extend(['--dataset', args.xgb_dataset])
+        if args.xgb_dataset_path:
+            cmd.extend(['--dataset-path', args.xgb_dataset_path])
+        if args.xgb_num_samples:
+            cmd.extend(['--num-samples', str(args.xgb_num_samples)])
+        if args.xgb_num_features:
+            cmd.extend(['--num-features', str(args.xgb_num_features)])
+        if args.xgb_num_rounds:
+            cmd.extend(['--num-rounds', str(args.xgb_num_rounds)])
+        if args.xgb_max_depth:
+            cmd.extend(['--max-depth', str(args.xgb_max_depth)])
+        if args.xgb_num_threads:
+            cmd.extend(['--num-threads', str(args.xgb_num_threads)])
+        if args.seed:
+            cmd.extend(['--seed', str(args.seed)])
+
+    elif args.workload == 'memcached':
+        if args.memcached_port:
+            cmd.extend(['--port', str(args.memcached_port)])
+        if args.memcached_memory:
+            cmd.extend(['--memory-mb', str(args.memcached_memory)])
+        if args.ycsb_workload:
+            cmd.extend(['--ycsb-workload', args.ycsb_workload])
+        if args.ycsb_home:
+            cmd.extend(['--ycsb-home', args.ycsb_home])
+        if args.record_count:
+            cmd.extend(['--record-count', str(args.record_count)])
+        if args.ycsb_threads:
+            cmd.extend(['--ycsb-threads', str(args.ycsb_threads)])
+        if args.target_throughput:
+            cmd.extend(['--target-throughput', str(args.target_throughput)])
+
+    elif args.workload == '7zip':
+        if args.compression_level:
+            cmd.extend(['--compression-level', str(args.compression_level)])
+        if args.sevenzip_threads:
+            cmd.extend(['--threads', str(args.sevenzip_threads)])
+        if args.input_size_mb:
+            cmd.extend(['--input-size-mb', str(args.input_size_mb)])
+        if args.seed:
+            cmd.extend(['--seed', str(args.seed)])
 
     return cmd
 
@@ -288,6 +344,52 @@ def parse_args():
     wl_group.add_argument('--operations', type=int, default=None,
                           help='Number of operations (dataproc workload)')
 
+    # YCSB (shared by redis and memcached)
+    wl_group.add_argument('--ycsb-workload', type=str, default=None,
+                          choices=['a', 'b', 'c', 'd', 'e', 'f'],
+                          help='YCSB workload type (redis/memcached)')
+    wl_group.add_argument('--ycsb-home', type=str, default=None,
+                          help='YCSB installation path (default: /opt/ycsb)')
+    wl_group.add_argument('--record-count', type=int, default=None,
+                          help='Number of YCSB records (redis/memcached)')
+    wl_group.add_argument('--ycsb-threads', type=int, default=None,
+                          help='YCSB client threads (redis/memcached)')
+    wl_group.add_argument('--target-throughput', type=int, default=None,
+                          help='YCSB target ops/sec, 0=unlimited (redis/memcached)')
+
+    # XGBoost
+    wl_group.add_argument('--xgb-dataset', type=str, default=None,
+                          choices=['synthetic', 'covtype', 'higgs'],
+                          help='XGBoost dataset (xgboost workload)')
+    wl_group.add_argument('--xgb-dataset-path', type=str, default=None,
+                          help='Path to dataset file (xgboost workload)')
+    wl_group.add_argument('--xgb-num-samples', type=int, default=None,
+                          help='Number of samples for synthetic (xgboost workload)')
+    wl_group.add_argument('--xgb-num-features', type=int, default=None,
+                          help='Number of features for synthetic (xgboost workload)')
+    wl_group.add_argument('--xgb-num-rounds', type=int, default=None,
+                          help='Max boosting rounds (xgboost workload)')
+    wl_group.add_argument('--xgb-max-depth', type=int, default=None,
+                          help='Tree max depth (xgboost workload)')
+    wl_group.add_argument('--xgb-num-threads', type=int, default=None,
+                          help='Number of threads (xgboost workload)')
+    wl_group.add_argument('--seed', type=int, default=None,
+                          help='Random seed (xgboost/7zip workload)')
+
+    # Memcached
+    wl_group.add_argument('--memcached-port', type=int, default=None,
+                          help='Memcached port (memcached workload)')
+    wl_group.add_argument('--memcached-memory', type=int, default=None,
+                          help='Memcached memory in MB (memcached workload)')
+
+    # 7zip
+    wl_group.add_argument('--compression-level', type=int, default=None,
+                          help='Compression level 1-9 (7zip workload)')
+    wl_group.add_argument('--sevenzip-threads', type=int, default=None,
+                          help='Compression threads (7zip workload)')
+    wl_group.add_argument('--input-size-mb', type=int, default=None,
+                          help='Input file size in MB (7zip workload)')
+
     # Logging
     parser.add_argument('--log-level', type=str, default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
@@ -333,6 +435,7 @@ def main():
     )
 
     tracker = None
+    tracker_proc = None
     try:
         # Wait for workload to be ready
         logger.info("Waiting for workload to become ready...")

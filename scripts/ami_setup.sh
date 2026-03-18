@@ -66,7 +66,10 @@ apt-get install -y \
     python3 \
     python3-pip \
     redis-server \
-    ffmpeg
+    ffmpeg \
+    memcached \
+    p7zip-full \
+    default-jre-headless
 
 # Install documentation tools (optional, for building docs)
 apt-get install -y --no-install-recommends asciidoc xmlto
@@ -95,7 +98,7 @@ rm -rf criu-s3
 
 # 4. Install Python packages
 echo "[4/7] Installing Python packages..."
-pip3 install --break-system-packages numpy redis paramiko pyyaml boto3 scp
+pip3 install --break-system-packages numpy redis paramiko pyyaml boto3 scp xgboost
 pip3 install --break-system-packages torch --index-url https://download.pytorch.org/whl/cpu
 
 # 5. Clone workload repository
@@ -135,10 +138,49 @@ echo "Dirty trackers built:"
 ls -la "$WORKLOAD_DIR/tools/dirty_tracker_go/dirty_tracker"
 ls -la "$WORKLOAD_DIR/tools/dirty_tracker_c/dirty_tracker"
 
-# 6. Configure Redis (disable system service)
+# 5.6 Install YCSB benchmark
+echo "[5.6/7] Installing YCSB..."
+YCSB_VERSION="0.17.0"
+if [ ! -d "/opt/ycsb" ]; then
+    cd /tmp
+    curl -sSL -O "https://github.com/brianfrankcooper/YCSB/releases/download/${YCSB_VERSION}/ycsb-${YCSB_VERSION}.tar.gz"
+    tar xf "ycsb-${YCSB_VERSION}.tar.gz"
+    mv "ycsb-${YCSB_VERSION}" /opt/ycsb
+    rm -f "ycsb-${YCSB_VERSION}.tar.gz"
+    echo "YCSB installed at /opt/ycsb"
+else
+    echo "YCSB already installed at /opt/ycsb"
+fi
+
+# 5.7 Install Python 2 for YCSB (bin/ycsb is Python 2 script)
+echo "[5.7/7] Installing Python 2 for YCSB..."
+PYTHON2_VERSION="2.7.18"
+if ! command -v python2 &> /dev/null; then
+    # Build Python 2 from source (not in Ubuntu 24.04 repos)
+    apt-get install -y libffi-dev libsqlite3-dev zlib1g-dev
+    cd /tmp
+    wget -q "https://www.python.org/ftp/python/${PYTHON2_VERSION}/Python-${PYTHON2_VERSION}.tgz"
+    tar xf "Python-${PYTHON2_VERSION}.tgz"
+    cd "Python-${PYTHON2_VERSION}"
+    ./configure --prefix=/usr/local --enable-optimizations 2>&1 | tail -1
+    make -j$(nproc) 2>&1 | tail -1
+    make altinstall 2>&1 | tail -1
+    ln -sf /usr/local/bin/python2.7 /usr/local/bin/python2
+    cd /tmp
+    rm -rf "Python-${PYTHON2_VERSION}" "Python-${PYTHON2_VERSION}.tgz"
+    echo "Python 2.7 installed: $(python2 --version 2>&1)"
+fi
+
+# Patch YCSB shebang to use python2 explicitly
+sed -i '1s|#!/usr/bin/env python$|#!/usr/bin/env python2|' /opt/ycsb/bin/ycsb
+echo "YCSB patched to use python2"
+
+# 6. Configure services (disable system services, workloads manage their own)
 echo "[6/7] Configuring services..."
 systemctl stop redis-server || true
 systemctl disable redis-server || true
+systemctl stop memcached || true
+systemctl disable memcached || true
 
 # 7. Configure kernel for CRIU
 echo "[7/7] Configuring kernel parameters..."
@@ -160,9 +202,14 @@ echo "CRIU: $(criu --version 2>&1 | head -1)"
 echo "Python: $(python3 --version)"
 echo "Redis: $(redis-server --version)"
 echo "FFmpeg: $(ffmpeg -version 2>&1 | head -1)"
+echo "Memcached: $(memcached -h 2>&1 | head -1)"
+echo "7zip: $(7z --help 2>&1 | head -1)"
+echo "Java: $(java -version 2>&1 | head -1)"
+echo "YCSB: $(ls /opt/ycsb/bin/ycsb 2>/dev/null && echo 'installed' || echo 'NOT FOUND')"
 python3 -c "import numpy; print(f'NumPy: {numpy.__version__}')"
 python3 -c "import torch; print(f'PyTorch: {torch.__version__}')"
 python3 -c "import redis; print(f'redis-py: {redis.__version__}')"
+python3 -c "import xgboost; print(f'XGBoost: {xgboost.__version__}')"
 
 echo ""
 echo "=== CRIU Check ==="
@@ -173,7 +220,7 @@ echo "=== AMI Setup Complete ==="
 echo "CRIU source: https://github.com/ddps-lab/criu-s3"
 echo "Workload repo: $REPO_URL"
 echo "Workload dir: $WORKLOAD_DIR"
-echo "Workloads ready: memory, matmul, redis, ml_training, jupyter, video, dataproc"
+echo "Workloads ready: memory, matmul, redis, ml_training, video, dataproc, xgboost, memcached, 7zip"
 echo ""
 echo "Next steps:"
 echo "1. Stop this instance"

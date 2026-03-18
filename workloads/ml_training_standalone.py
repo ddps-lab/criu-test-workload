@@ -143,6 +143,7 @@ def run_ml_training_workload(
     print(f"[MLTrain] Config: model_size={model_size}, batch_size={batch_size}, epochs={epochs or 'infinite'}, duration={duration_str}")
     print(f"[MLTrain] Device: {device}")
     print(f"[MLTrain] Working directory: {working_dir}")
+    os.makedirs(working_dir, exist_ok=True)
 
     # Get model configuration
     config = get_model_config(model_size)

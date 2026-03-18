@@ -100,7 +100,7 @@ def parse_args():
         '--workload', '-w',
         type=str,
         default='memory',
-        choices=['memory', 'matmul', 'redis', 'ml_training', 'dataproc', 'video'],
+        choices=['memory', 'matmul', 'redis', 'ml_training', 'dataproc', 'video', 'xgboost', 'memcached', '7zip'],
         help='Workload type to run'
     )
     parser.add_argument(

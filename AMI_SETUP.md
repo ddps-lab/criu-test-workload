@@ -11,18 +11,54 @@
 | Python | 3.10+ | Workload 실행 |
 | Redis | 7.0+ | Redis workload |
 | FFmpeg | 5.0+ | Video workload |
-| NumPy | 1.24+ | matmul, dataproc, jupyter |
+| NumPy | 1.24+ | matmul, dataproc, xgboost |
 | PyTorch | 2.0+ | ml_training |
+| XGBoost | 2.0+ | xgboost |
+| Memcached | 1.6+ | memcached workload |
+| p7zip-full | - | 7zip workload |
+| YCSB | 0.17.0 | redis/memcached YCSB 모드 |
+| Java (JRE) | 11+ | YCSB 실행 |
+| Python 2.7 | 2.7.18 | YCSB bin/ycsb 스크립트 |
 
 ## 빠른 설치
 
+### AMI 구성 (프로덕션)
+
 ```bash
-# 스크립트 실행
+# AMI용 전체 설치 (root 권한, CRIU 빌드 포함)
 chmod +x scripts/ami_setup.sh
 sudo ./scripts/ami_setup.sh
 ```
 
 전체 설치 스크립트: [scripts/ami_setup.sh](scripts/ami_setup.sh)
+
+### 로컬 개발 환경
+
+```bash
+# 로컬 개발용 의존성 설치 (CRIU 빌드 제외, dirty tracking + checkpoint 프로토콜 테스트용)
+chmod +x scripts/setup_local.sh
+./scripts/setup_local.sh              # 전체 설치 (YCSB, PyTorch 포함)
+./scripts/setup_local.sh --minimal    # 최소 설치 (YCSB, PyTorch 제외)
+./scripts/setup_local.sh --check      # 설치 상태만 확인
+```
+
+### 외부 데이터셋 다운로드
+
+```bash
+# XGBoost 워크로드용 외부 데이터셋 (선택사항)
+chmod +x scripts/download_datasets.sh
+./scripts/download_datasets.sh                     # 전체 다운로드 (Higgs 7.5GB + Covtype 76MB)
+./scripts/download_datasets.sh --dataset higgs      # Higgs만 (~2.6GB CSV)
+./scripts/download_datasets.sh --dataset covtype    # Covtype만 (~76MB)
+./scripts/download_datasets.sh --output-dir ~/data  # 커스텀 저장 경로
+./scripts/download_datasets.sh --check              # 다운로드 상태 확인
+
+# 사용 예시
+python3 workloads/xgboost_standalone.py --dataset higgs --dataset-path /data/HIGGS.csv --duration 300
+python3 workloads/xgboost_standalone.py --dataset covtype --dataset-path /data/covtype.data --duration 300
+```
+
+**참고**: synthetic 데이터셋은 `--seed` 옵션으로 deterministic 생성되므로 외부 다운로드 불필요.
 
 ---
 
@@ -94,35 +130,55 @@ pip3 install --break-system-packages \
     numpy \
     redis \
     paramiko \
-    pyyaml
+    pyyaml \
+    boto3 \
+    scp \
+    xgboost
 
 # PyTorch (CPU only - 용량 줄이기 위해)
 pip3 install --break-system-packages \
     torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
-### 4. Redis 서버 설치
+### 4. Redis, Memcached, 7zip, Java 설치
 
 ```bash
 # Redis 설치
 sudo apt-get install -y redis-server
 
-# 시스템 서비스 비활성화 (워크로드에서 직접 실행)
-sudo systemctl stop redis-server
-sudo systemctl disable redis-server
+# Memcached 설치
+sudo apt-get install -y memcached
 
-# 설치 확인
-redis-server --version
+# 7zip 설치
+sudo apt-get install -y p7zip-full
+
+# Java (YCSB 실행에 필요)
+sudo apt-get install -y default-jre-headless
+
+# 시스템 서비스 비활성화 (워크로드에서 직접 실행)
+sudo systemctl stop redis-server && sudo systemctl disable redis-server
+sudo systemctl stop memcached && sudo systemctl disable memcached
 ```
 
 ### 5. FFmpeg 설치
 
 ```bash
-# FFmpeg 설치
 sudo apt-get install -y ffmpeg
+```
 
-# 설치 확인
-ffmpeg -version
+### 5.5 YCSB 설치
+
+```bash
+YCSB_VERSION="0.17.0"
+curl -sSL -O "https://github.com/brianfrankcooper/YCSB/releases/download/${YCSB_VERSION}/ycsb-${YCSB_VERSION}.tar.gz"
+tar xf "ycsb-${YCSB_VERSION}.tar.gz"
+sudo mv "ycsb-${YCSB_VERSION}" /opt/ycsb
+rm -f "ycsb-${YCSB_VERSION}.tar.gz"
+
+# YCSB bin/ycsb는 Python 2 스크립트이므로 python2 설치 필요
+# Ubuntu 24.04+에서는 소스 빌드 또는 pyenv 사용
+# shebang 패치: #!/usr/bin/env python → #!/usr/bin/env python2
+sudo sed -i '1s|#!/usr/bin/env python$|#!/usr/bin/env python2|' /opt/ycsb/bin/ycsb
 ```
 
 ### 6. 커널 설정 (CRIU 호환성)
@@ -205,20 +261,22 @@ python3 -c "import redis; print(f'redis-py version: {redis.__version__}')"
 
 echo ""
 echo "=== AMI Setup Complete ==="
-echo "Workloads ready: memory, matmul, redis, ml_training, jupyter, video, dataproc"
+echo "Workloads ready: memory, matmul, redis, ml_training, video, dataproc, xgboost, memcached, 7zip"
 ```
 
 ## 워크로드별 요구사항
 
-| 워크로드 | 필수 패키지 | 체크포인트 대상 |
-|---------|------------|---------------|
-| memory | (없음) | Python 프로세스 |
-| matmul | numpy | Python 프로세스 |
-| redis | redis-server, redis-py | **redis-server 프로세스** |
-| ml_training | torch | Python 프로세스 |
-| jupyter | numpy | Python 프로세스 (시뮬레이션) |
-| video | ffmpeg | **ffmpeg 프로세스** |
-| dataproc | numpy | Python 프로세스 |
+| 워크로드 | 필수 패키지 | 체크포인트 대상 | CRIU 플래그 |
+|---------|------------|---------------|-------------|
+| memory | (없음) | Python 프로세스 | `--shell-job` |
+| matmul | numpy | Python 프로세스 | `--shell-job` |
+| redis | redis-server, redis-py, YCSB+Java | **redis-server 프로세스** | `--shell-job --tcp-established` |
+| ml_training | torch | Python 프로세스 | `--shell-job` |
+| video | ffmpeg | **ffmpeg 프로세스** | `--shell-job` |
+| dataproc | numpy | Python 프로세스 | `--shell-job` |
+| xgboost | xgboost, numpy | Python 프로세스 | `--shell-job` |
+| memcached | memcached, YCSB+Java | **memcached 프로세스** | `--shell-job --tcp-established` |
+| 7zip | p7zip-full | **7z 프로세스** | `--shell-job` |
 
 ## AMI 생성 절차
 
@@ -274,8 +332,15 @@ python3 -c "
 import numpy as np
 import torch
 import redis
+import xgboost
 print('All packages OK')
 "
+
+# YCSB 테스트
+/opt/ycsb/bin/ycsb 2>&1 | head -1  # usage 출력 확인
+
+# 7zip 테스트
+7z --help 2>&1 | head -1
 ```
 
 ## 문제 해결
