@@ -54,6 +54,7 @@ STANDALONE_SCRIPTS = {
     'xgboost': 'workloads/xgboost_standalone.py',
     'memcached': 'workloads/memcached_standalone.py',
     '7zip': 'workloads/sevenzip_standalone.py',
+    'memwrite': 'workloads/memwrite_standalone.py',
 }
 
 
@@ -167,6 +168,9 @@ def build_workload_cmd(args, working_dir: str) -> list:
         if args.target_throughput:
             cmd.extend(['--target-throughput', str(args.target_throughput)])
 
+    elif args.workload == "memwrite":
+        if hasattr(args, "buffer_mb") and args.buffer_mb:
+            cmd.extend(["--buffer-mb", str(args.buffer_mb)])
     elif args.workload == '7zip':
         if args.compression_level:
             cmd.extend(['--compression-level', str(args.compression_level)])
@@ -221,7 +225,8 @@ def select_tracker(tracker_type: str) -> str:
 
 def start_external_tracker(tracker_type: str, pid: int, interval_ms: int,
                            duration_sec: int, workload_name: str,
-                           output_file: str, no_clear: bool) -> subprocess.Popen:
+                           output_file: str, no_clear: bool,
+                           uffd_sync: bool = False, sd_only: bool = False) -> subprocess.Popen:
     """Start C or Go tracker as a subprocess. Requires sudo for pagemap access."""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     tracker_path = os.path.join(base_dir, TRACKER_PATHS[tracker_type])
@@ -232,6 +237,10 @@ def start_external_tracker(tracker_type: str, pid: int, interval_ms: int,
                '-w', workload_name, '-o', output_file]
         if no_clear:
             cmd.append('-n')
+        if uffd_sync:
+            cmd.append('--uffd-sync')
+        if sd_only:
+            cmd.append('--sd-only')
     elif tracker_type == 'go':
         cmd = ['sudo', tracker_path,
                '-pid', str(pid), '-interval', str(interval_ms),
@@ -290,6 +299,10 @@ def parse_args():
     dirty_group.add_argument('--no-track-children', dest='track_children',
                              action='store_false', default=True,
                              help='Disable tracking of child processes (python tracker only)')
+    dirty_group.add_argument('--uffd-sync', action='store_true', default=False,
+                             help='Use userfaultfd synchronous WP mode (C tracker only, OoH ufd comparison)')
+    dirty_group.add_argument('--sd-only', action='store_true', default=False,
+                             help='Use soft-dirty clear+read only, no uffd (C tracker only, OoH /proc comparison)')
 
     # Workload-specific options
     wl_group = parser.add_argument_group('Workload Options')
@@ -470,7 +483,8 @@ def main():
             tracker_proc = start_external_tracker(
                 selected_tracker, workload_pid,
                 args.dirty_track_interval, args.duration,
-                args.workload, tracker_output, args.dirty_no_clear
+                args.workload, tracker_output, args.dirty_no_clear,
+                uffd_sync=args.uffd_sync, sd_only=args.sd_only
             )
         else:
             # In-process Python tracker

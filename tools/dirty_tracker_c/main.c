@@ -35,6 +35,8 @@
 #include <sys/mman.h>
 #include <dirent.h>
 #include <linux/userfaultfd.h>
+#include <pthread.h>
+#include <poll.h>
 
 /* PAGEMAP_SCAN definitions (kernel 6.7+) */
 #ifndef PAGEMAP_SCAN
@@ -88,8 +90,8 @@ struct pm_scan_arg {
 #endif
 #define MAX_VMAS 4096
 #define MAX_REGIONS 65536
-#define MAX_SAMPLES 10000
 #define MAX_PROCESSES 64
+#define UNIQUE_HASH_SIZE 65537  /* prime, for unique address hash table */
 
 /* VMA types */
 typedef enum {
@@ -119,6 +121,14 @@ typedef struct {
     char pathname[256];
 } dirty_page_t;
 
+/* Sync mode dirty page collection buffer */
+typedef struct {
+    uint64_t *addrs;
+    size_t count;
+    size_t capacity;
+    pthread_mutex_t lock;
+} sync_dirty_set_t;
+
 /* Per-process tracking state */
 typedef struct {
     pid_t pid;
@@ -130,6 +140,13 @@ typedef struct {
     long target_uffd;       /* userfaultfd fd number inside the target process (-1 if not set) */
     bool wp_active;         /* true if WP mode is actually working */
     bool wp_initialized;    /* set after initial WP probe/setup */
+
+    /* uffd-sync mode state */
+    int tracker_uffd_fd;            /* uffd fd copied to tracker via pidfd_getfd (-1 if not set) */
+    sync_dirty_set_t sync_dirty;    /* dirty page collection for sync mode */
+    pthread_t sync_handler_thread;  /* fault handler thread */
+    volatile bool sync_handler_running; /* handler thread is active */
+    volatile bool stop_sync_handler;    /* signal to stop handler thread */
 
     /* Per-process VMAs */
     vma_info_t *vmas;
@@ -154,6 +171,20 @@ typedef struct {
     long writable_vma_bytes;    /* Sum of writable VMA sizes from /proc/pid/maps */
 } sample_t;
 
+/* Unique address hash node */
+typedef struct unique_node {
+    uint64_t addr;
+    struct unique_node *next;
+} unique_node_t;
+
+/* Timeline entry (lightweight, for dirty_rate_timeline output) */
+typedef struct {
+    double timestamp_ms;
+    double rate_pages_per_sec;
+    int cumulative_pages;
+    int processes_tracked;
+} timeline_entry_t;
+
 /* Tracker state */
 typedef struct {
     pid_t root_pid;
@@ -175,16 +206,16 @@ typedef struct {
     struct page_region regions[MAX_REGIONS];
     struct page_region sd_regions[MAX_REGIONS];
 
-    /* Samples (aggregate across all processes) */
-    sample_t samples[MAX_SAMPLES];
-    int sample_count;
+    /* Current sample (reused each iteration, flushed+freed after each) */
+    sample_t current_sample;
+    int sample_count;            /* total samples collected (monotonic) */
+    double prev_timestamp_ms;    /* for rate calculation */
     struct timespec start_time;
 
     /* Aggregate statistics */
     int total_dirty_pages;
-    uint64_t *unique_addrs;
+    unique_node_t *unique_hash[UNIQUE_HASH_SIZE];
     int unique_count;
-    int unique_capacity;
 
     /* VMA type counters (indexed by vma_type_t) */
     int vma_type_counts[7];
@@ -193,6 +224,26 @@ typedef struct {
     /* Dual-channel mode */
     bool dual_channel;     /* collect both WP and soft-dirty simultaneously */
     bool sd_clear;         /* clear soft-dirty after each dual-channel scan */
+
+    /* OoH comparison modes */
+    bool sd_only;          /* --sd-only: soft-dirty clear+read only, no uffd (OoH /proc) */
+    bool uffd_sync;        /* --uffd-sync: userfaultfd synchronous WP mode (OoH ufd) */
+
+    /* Streaming output */
+    FILE *output_fp;            /* opened at start, written incrementally */
+    bool no_output;             /* -Q: scan+track but don't store/write page data */
+    int samples_written;        /* number of samples already flushed to file */
+
+    /* Incremental summary stats */
+    double sum_rate;            /* running sum of per-sample dirty rates */
+    int rate_count;             /* number of positive-rate samples */
+    double peak_rate;           /* max rate seen */
+    int cumulative_dirty;       /* running total dirty page count */
+
+    /* Timeline (lightweight entries for dirty_rate_timeline) */
+    timeline_entry_t *timeline;
+    int timeline_count;
+    int timeline_capacity;
 } tracker_t;
 
 
@@ -343,7 +394,9 @@ static process_tracker_t *process_tracker_init(pid_t pid) {
     pt->pagemap_fd = -1;
     pt->clear_refs_fd = -1;
     pt->target_uffd = -1;
+    pt->tracker_uffd_fd = -1;
     pt->is_alive = true;
+    pthread_mutex_init(&pt->sync_dirty.lock, NULL);
 
     /* Allocate VMA buffer */
     pt->vma_capacity = MAX_VMAS;
@@ -381,10 +434,27 @@ static int cleanup_userfaultfd_wp_for_process(process_tracker_t *pt);
 static void process_tracker_cleanup(process_tracker_t *pt) {
     if (!pt) return;
 
+    /* Stop sync handler thread if running */
+    if (pt->sync_handler_running) {
+        pt->stop_sync_handler = true;
+        pthread_join(pt->sync_handler_thread, NULL);
+        pt->sync_handler_running = false;
+    }
+
     /* Clean up uffd-wp in target process */
     if (pt->wp_active && pt->target_uffd >= 0) {
         cleanup_userfaultfd_wp_for_process(pt);
     }
+
+    /* Clean up tracker-side uffd fd */
+    if (pt->tracker_uffd_fd >= 0) {
+        close(pt->tracker_uffd_fd);
+        pt->tracker_uffd_fd = -1;
+    }
+
+    /* Clean up sync dirty set */
+    free(pt->sync_dirty.addrs);
+    pthread_mutex_destroy(&pt->sync_dirty.lock);
 
     if (pt->pagemap_fd >= 0) close(pt->pagemap_fd);
     if (pt->clear_refs_fd >= 0) close(pt->clear_refs_fd);
@@ -406,7 +476,8 @@ static void clear_soft_dirty_for_process(process_tracker_t *pt) {
 
 static int tracker_init(tracker_t *t, pid_t root_pid, int interval_ms,
                         bool no_clear, bool dual_channel, bool sd_clear,
-                        bool track_children) {
+                        bool track_children, bool sd_only, bool uffd_sync,
+                        bool no_output) {
     memset(t, 0, sizeof(*t));
 
     t->root_pid = root_pid;
@@ -415,16 +486,21 @@ static int tracker_init(tracker_t *t, pid_t root_pid, int interval_ms,
     t->dual_channel = dual_channel;
     t->sd_clear = sd_clear;
     t->track_children = track_children;
+    t->sd_only = sd_only;
+    t->uffd_sync = uffd_sync;
+    t->no_output = no_output;
 
-    /* Initialize unique address tracking */
-    t->unique_capacity = 65536;
-    t->unique_addrs = malloc(t->unique_capacity * sizeof(uint64_t));
-    if (!t->unique_addrs) return -1;
+    /* unique_hash is zeroed by memset above */
+
+    /* Initialize timeline */
+    t->timeline_capacity = 1024;
+    t->timeline = malloc(t->timeline_capacity * sizeof(timeline_entry_t));
+    if (!t->timeline) return -1;
 
     /* Initialize root process tracker */
     process_tracker_t *root_pt = process_tracker_init(root_pid);
     if (!root_pt) {
-        free(t->unique_addrs);
+        free(t->timeline);
         return -1;
     }
 
@@ -447,14 +523,23 @@ static void tracker_cleanup(tracker_t *t) {
     }
     t->process_count = 0;
 
-    /* Free samples */
-    for (int i = 0; i < t->sample_count; i++) {
-        free(t->samples[i].pages);
-        free(t->samples[i].sd_pages);
-        free(t->samples[i].pids_tracked);
+    /* Free current_sample if not yet flushed */
+    free(t->current_sample.pages);
+    free(t->current_sample.sd_pages);
+    free(t->current_sample.pids_tracked);
+
+    /* Free unique address hash table */
+    for (int i = 0; i < UNIQUE_HASH_SIZE; i++) {
+        unique_node_t *node = t->unique_hash[i];
+        while (node) {
+            unique_node_t *next = node->next;
+            free(node);
+            node = next;
+        }
     }
 
-    free(t->unique_addrs);
+    /* Free timeline */
+    free(t->timeline);
 }
 
 /*
@@ -565,7 +650,7 @@ static int write_to_target(pid_t pid, uint64_t addr, const void *data, size_t le
  *
  * Returns 0 on success, -1 on failure (caller should fall back to soft-dirty).
  */
-static int setup_userfaultfd_wp_for_process(process_tracker_t *pt)
+static int setup_userfaultfd_wp_for_process(process_tracker_t *pt, bool uffd_sync_mode)
 {
     pid_t pid = pt->pid;
     int ret = -1;
@@ -625,31 +710,59 @@ static int setup_userfaultfd_wp_for_process(process_tracker_t *pt)
     uint64_t scratch = (uint64_t)result;
 
     /* 5. Inject userfaultfd() syscall
-     *    Use UFFD_USER_MODE_ONLY to bypass CAP_SYS_PTRACE requirement
-     *    (available since Linux 6.1). Fallback to privileged mode if needed.
+     *    For async mode: use UFFD_USER_MODE_ONLY to bypass CAP_SYS_PTRACE.
+     *    For sync mode: MUST NOT use UFFD_USER_MODE_ONLY because it rejects
+     *    kernel-mode WP faults (e.g., on TLS pages accessed during syscalls),
+     *    which breaks fault delivery. Instead, temporarily enable sysctl.
      */
-    if (inject_syscall(pid, saved_regs.rip,
-                       __NR_userfaultfd,
-                       O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY,
-                       0, 0, 0, 0, 0, &result) < 0 || result < 0) {
-        /* Try without UFFD_USER_MODE_ONLY (requires CAP_SYS_PTRACE or sysctl) */
+    if (!uffd_sync_mode) {
+        /* Async mode: try UFFD_USER_MODE_ONLY first */
+        if (inject_syscall(pid, saved_regs.rip,
+                           __NR_userfaultfd,
+                           O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY,
+                           0, 0, 0, 0, 0, &result) < 0 || result < 0) {
+            /* Fallback without UFFD_USER_MODE_ONLY */
+            if (inject_syscall(pid, saved_regs.rip,
+                               __NR_userfaultfd,
+                               O_CLOEXEC | O_NONBLOCK,
+                               0, 0, 0, 0, 0, &result) < 0 || result < 0) {
+                fprintf(stderr, "inject userfaultfd failed (pid=%d): result=%ld\n", pid, result);
+                fprintf(stderr, "  hint: try 'sysctl -w vm.unprivileged_userfaultfd=1'\n");
+                goto cleanup_mmap;
+            }
+        }
+    } else {
+        /* Sync mode: enable sysctl, create uffd WITHOUT UFFD_USER_MODE_ONLY */
+        FILE *sysctl_f = fopen("/proc/sys/vm/unprivileged_userfaultfd", "r");
+        int saved_sysctl = 0;
+        if (sysctl_f) { fscanf(sysctl_f, "%d", &saved_sysctl); fclose(sysctl_f); }
+        if (!saved_sysctl) {
+            sysctl_f = fopen("/proc/sys/vm/unprivileged_userfaultfd", "w");
+            if (sysctl_f) { fprintf(sysctl_f, "1"); fclose(sysctl_f); }
+        }
+
         if (inject_syscall(pid, saved_regs.rip,
                            __NR_userfaultfd,
                            O_CLOEXEC | O_NONBLOCK,
                            0, 0, 0, 0, 0, &result) < 0 || result < 0) {
-            fprintf(stderr, "inject userfaultfd failed (pid=%d): result=%ld\n", pid, result);
-            fprintf(stderr, "  hint: try 'sysctl -w vm.unprivileged_userfaultfd=1'\n");
+            fprintf(stderr, "inject userfaultfd (sync) failed (pid=%d): result=%ld\n", pid, result);
             goto cleanup_mmap;
+        }
+
+        /* Restore sysctl */
+        if (!saved_sysctl) {
+            sysctl_f = fopen("/proc/sys/vm/unprivileged_userfaultfd", "w");
+            if (sysctl_f) { fprintf(sysctl_f, "0"); fclose(sysctl_f); }
         }
     }
     long uffd = result;
     fprintf(stderr, "Injected userfaultfd -> fd=%ld (pid=%d)\n", uffd, pid);
 
-    /* 6. UFFDIO_API: enable WP_ASYNC feature */
+    /* 6. UFFDIO_API: enable WP features */
     {
         struct uffdio_api api = {
             .api = UFFD_API,
-            .features = UFFD_FEATURE_WP_ASYNC,
+            .features = uffd_sync_mode ? 0 : UFFD_FEATURE_WP_ASYNC,
         };
         if (write_to_target(pid, scratch, &api, sizeof(api)) < 0) {
             fprintf(stderr, "write uffdio_api to target failed\n");
@@ -661,7 +774,8 @@ static int setup_userfaultfd_wp_for_process(process_tracker_t *pt)
             fprintf(stderr, "inject UFFDIO_API failed: result=%ld\n", result);
             goto cleanup_uffd;
         }
-        fprintf(stderr, "UFFDIO_API success (WP_ASYNC enabled, pid=%d)\n", pid);
+        fprintf(stderr, "UFFDIO_API success (%s, pid=%d)\n",
+                uffd_sync_mode ? "sync WP mode" : "WP_ASYNC enabled", pid);
     }
 
     /* 7. Register each writable VMA with UFFDIO_REGISTER_MODE_WP */
@@ -892,6 +1006,121 @@ restore:
     return 0;
 }
 
+/* ===== uffd-sync handler thread ===== */
+
+/**
+ * Handler thread for userfaultfd synchronous WP mode.
+ *
+ * Reads WP fault events from uffd, records the faulting address,
+ * and unprotects the page so the target process can resume.
+ * This creates the synchronous overhead that OoH measured (~15x).
+ */
+static void *uffd_sync_handler(void *arg) {
+    process_tracker_t *pt = (process_tracker_t *)arg;
+    struct uffd_msg msg;
+    unsigned long fault_count = 0;
+    unsigned long poll_timeout_count = 0;
+
+    while (!pt->stop_sync_handler) {
+        struct pollfd pfd = { .fd = pt->tracker_uffd_fd, .events = POLLIN };
+        int ret = poll(&pfd, 1, 100);  /* 100ms timeout for stop check */
+        if (ret <= 0) {
+            if (ret == 0) poll_timeout_count++;
+            continue;
+        }
+
+        ssize_t n = read(pt->tracker_uffd_fd, &msg, sizeof(msg));
+        if (n != (ssize_t)sizeof(msg)) continue;
+        if (msg.event != UFFD_EVENT_PAGEFAULT) continue;
+        if (!(msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP)) continue;
+
+        uint64_t addr = msg.arg.pagefault.address & ~0xFFFUL;
+        fault_count++;
+
+        /* Record dirty page */
+        pthread_mutex_lock(&pt->sync_dirty.lock);
+        if (pt->sync_dirty.count >= pt->sync_dirty.capacity) {
+            pt->sync_dirty.capacity = pt->sync_dirty.capacity ? pt->sync_dirty.capacity * 2 : 4096;
+            pt->sync_dirty.addrs = realloc(pt->sync_dirty.addrs,
+                pt->sync_dirty.capacity * sizeof(uint64_t));
+        }
+        pt->sync_dirty.addrs[pt->sync_dirty.count++] = addr;
+        pthread_mutex_unlock(&pt->sync_dirty.lock);
+
+        /* Unprotect page so target process resumes */
+        struct uffdio_writeprotect wp = {
+            .range = { .start = addr, .len = PAGE_SIZE },
+            .mode = 0,
+        };
+        ioctl(pt->tracker_uffd_fd, UFFDIO_WRITEPROTECT, &wp);
+    }
+
+    fprintf(stderr, "uffd-sync handler: %lu faults handled, %lu poll timeouts\n",
+            fault_count, poll_timeout_count);
+    return NULL;
+}
+
+/**
+ * Setup uffd-sync mode for a process after uffd-wp injection.
+ *
+ * 1. Copy uffd fd from target to tracker via pidfd_getfd
+ * 2. Write-protect all writable VMAs
+ * 3. Start handler thread
+ *
+ * Called after setup_userfaultfd_wp_for_process() succeeds and ptrace detaches.
+ */
+static int setup_uffd_sync_for_process(process_tracker_t *pt) {
+    pid_t pid = pt->pid;
+
+    /* 1. Copy uffd fd from target to tracker via pidfd_getfd */
+    long pidfd = syscall(__NR_pidfd_open, pid, 0);
+    if (pidfd < 0) {
+        fprintf(stderr, "pidfd_open failed (pid=%d): %s\n", pid, strerror(errno));
+        return -1;
+    }
+
+    pt->tracker_uffd_fd = (int)syscall(__NR_pidfd_getfd, (int)pidfd, (int)pt->target_uffd, 0);
+    close((int)pidfd);
+
+    if (pt->tracker_uffd_fd < 0) {
+        fprintf(stderr, "pidfd_getfd failed (pid=%d, target_uffd=%ld): %s\n",
+                pid, pt->target_uffd, strerror(errno));
+        return -1;
+    }
+    fprintf(stderr, "pidfd_getfd: copied uffd fd=%ld -> tracker fd=%d (pid=%d)\n",
+            pt->target_uffd, pt->tracker_uffd_fd, pid);
+
+    /* 2. Start handler thread BEFORE WP (handler must be ready for immediate faults) */
+    pt->stop_sync_handler = false;
+    if (pthread_create(&pt->sync_handler_thread, NULL, uffd_sync_handler, pt) != 0) {
+        fprintf(stderr, "Failed to create uffd sync handler thread: %s\n", strerror(errno));
+        close(pt->tracker_uffd_fd);
+        pt->tracker_uffd_fd = -1;
+        return -1;
+    }
+    pt->sync_handler_running = true;
+
+    /* 3. Write-protect all writable VMAs */
+    int wp_count = 0;
+    for (int v = 0; v < pt->vma_count; v++) {
+        vma_info_t *vma = &pt->vmas[v];
+        if (!strchr(vma->perms, 'w')) continue;
+        if (!strchr(vma->perms, 'p')) continue;
+        if (vma->type == VMA_VDSO) continue;
+
+        struct uffdio_writeprotect wp = {
+            .range = { .start = vma->start, .len = vma->end - vma->start },
+            .mode = UFFDIO_WRITEPROTECT_MODE_WP,
+        };
+        if (ioctl(pt->tracker_uffd_fd, UFFDIO_WRITEPROTECT, &wp) == 0) {
+            wp_count++;
+        }
+    }
+    fprintf(stderr, "uffd-sync: write-protected %d VMAs (pid=%d)\n", wp_count, pid);
+
+    return 0;
+}
+
 /* ===== Child process discovery ===== */
 
 /**
@@ -982,17 +1211,21 @@ static int discover_descendants(pid_t root_pid, pid_t *out_pids, int max_pids) {
 /* ===== Unique address tracking ===== */
 
 static void add_unique_addr(tracker_t *t, uint64_t addr) {
-    /* Simple linear search (could be optimized with hash set) */
-    for (int i = 0; i < t->unique_count; i++) {
-        if (t->unique_addrs[i] == addr) return;
-    }
+    if (t->no_output) return;  /* --no-output: skip unique tracking */
 
-    if (t->unique_count >= t->unique_capacity) {
-        t->unique_capacity *= 2;
-        t->unique_addrs = realloc(t->unique_addrs, t->unique_capacity * sizeof(uint64_t));
+    unsigned int bucket = (unsigned int)(addr >> 12) % UNIQUE_HASH_SIZE;
+    unique_node_t *node = t->unique_hash[bucket];
+    while (node) {
+        if (node->addr == addr) return;  /* already exists */
+        node = node->next;
     }
-
-    t->unique_addrs[t->unique_count++] = addr;
+    /* Insert new */
+    node = malloc(sizeof(unique_node_t));
+    if (!node) return;
+    node->addr = addr;
+    node->next = t->unique_hash[bucket];
+    t->unique_hash[bucket] = node;
+    t->unique_count++;
 }
 
 /* ===== Dirty page scanning ===== */
@@ -1017,7 +1250,7 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
          * This is needed because PM_SCAN_WP_MATCHING requires VM_UFFD_WP
          * on the target's VMAs, which can only be set from within the process.
          */
-        if (setup_userfaultfd_wp_for_process(pt) == 0) {
+        if (setup_userfaultfd_wp_for_process(pt, t->uffd_sync) == 0) {
             /* Step 2: Verify WP is now available */
             struct pm_scan_arg check_args = {
                 .size = sizeof(check_args),
@@ -1267,7 +1500,6 @@ static bool is_pid_known(tracker_t *t, pid_t pid) {
 /* ===== Sample collection ===== */
 
 static int collect_sample(tracker_t *t) {
-    if (t->sample_count >= MAX_SAMPLES) return -1;
 
     /* 1. Discover new child processes (if enabled) */
     if (t->track_children) {
@@ -1325,7 +1557,7 @@ static int collect_sample(tracker_t *t) {
     }
 
     /* 3. Allocate sample */
-    sample_t *sample = &t->samples[t->sample_count];
+    sample_t *sample = &t->current_sample;
     memset(sample, 0, sizeof(*sample));
     sample->timestamp_ms = get_elapsed_ms(&t->start_time);
 
@@ -1364,8 +1596,73 @@ static int collect_sample(tracker_t *t) {
         sample->writable_vma_bytes += calc_writable_vma_bytes(pt);
 
         /* Read dirty pages */
-        int ret;
-        if (pt->use_pagemap_scan) {
+        int ret = 0;
+
+        if (t->sd_only) {
+            /* sd-only mode: soft-dirty read + clear (no uffd) */
+            ret = read_dirty_pages_soft_dirty(t, pt, sample);
+        } else if (t->uffd_sync && pt->tracker_uffd_fd >= 0) {
+            /* uffd-sync mode: snapshot dirty set from handler thread */
+            pthread_mutex_lock(&pt->sync_dirty.lock);
+            for (size_t di = 0; di < pt->sync_dirty.count; di++) {
+                if (sample->page_count >= 65536) break;
+                uint64_t addr = pt->sync_dirty.addrs[di];
+
+                /* Find matching VMA for classification */
+                vma_type_t vtype = VMA_UNKNOWN;
+                const char *vperms = "----";
+                const char *vpathname = "";
+                for (int v = 0; v < pt->vma_count; v++) {
+                    if (addr >= pt->vmas[v].start && addr < pt->vmas[v].end) {
+                        vtype = pt->vmas[v].type;
+                        vperms = pt->vmas[v].perms;
+                        vpathname = pt->vmas[v].pathname;
+                        break;
+                    }
+                }
+
+                dirty_page_t *page = &sample->pages[sample->page_count++];
+                page->addr = addr;
+                page->vma_type = vtype;
+                strncpy(page->perms, vperms, sizeof(page->perms) - 1);
+                strncpy(page->pathname, vpathname, sizeof(page->pathname) - 1);
+
+                t->vma_type_counts[vtype]++;
+                t->vma_type_sizes[vtype] += PAGE_SIZE;
+                add_unique_addr(t, addr);
+            }
+            pt->sync_dirty.count = 0;
+            pthread_mutex_unlock(&pt->sync_dirty.lock);
+
+            /* Re-protect all writable VMAs for next interval */
+            for (int v = 0; v < pt->vma_count; v++) {
+                if (!strchr(pt->vmas[v].perms, 'w')) continue;
+                if (!strchr(pt->vmas[v].perms, 'p')) continue;
+                if (pt->vmas[v].type == VMA_VDSO) continue;
+                struct uffdio_writeprotect wp = {
+                    .range = { .start = pt->vmas[v].start,
+                               .len = pt->vmas[v].end - pt->vmas[v].start },
+                    .mode = UFFDIO_WRITEPROTECT_MODE_WP,
+                };
+                ioctl(pt->tracker_uffd_fd, UFFDIO_WRITEPROTECT, &wp);
+            }
+        } else if (t->uffd_sync && !pt->wp_initialized) {
+            /* uffd-sync mode: first call — setup uffd-wp + sync handler */
+            if (setup_userfaultfd_wp_for_process(pt, true) == 0) {
+                pt->wp_initialized = true;
+                pt->wp_active = true;
+                /* Setup sync handler (pidfd_getfd + WP + thread) */
+                if (setup_uffd_sync_for_process(pt) < 0) {
+                    fprintf(stderr, "ERROR: uffd-sync setup failed for pid=%d\n", pt->pid);
+                    ret = -1;
+                }
+                /* First interval: empty (baseline just established) */
+            } else {
+                fprintf(stderr, "ERROR: uffd-wp injection failed for sync mode (pid=%d)\n", pt->pid);
+                pt->wp_initialized = true;
+                ret = -1;
+            }
+        } else if (pt->use_pagemap_scan) {
             ret = read_dirty_pages_pagemap_scan(t, pt, sample);
         } else {
             ret = read_dirty_pages_soft_dirty(t, pt, sample);
@@ -1383,8 +1680,16 @@ static int collect_sample(tracker_t *t) {
     /*
      * WP channel: PM_SCAN_WP_MATCHING handles clearing atomically.
      * SD channel (dual-channel --sd-clear): clear soft-dirty after scan.
+     * sd-only: clear soft-dirty after each read.
      * Default: never clear soft-dirty (independent from CRIU).
      */
+    if (t->sd_only) {
+        for (int i = 0; i < t->process_count; i++) {
+            if (t->processes[i]) {
+                clear_soft_dirty_for_process(t->processes[i]);
+            }
+        }
+    }
     if (t->dual_channel && t->sd_clear) {
         for (int i = 0; i < t->process_count; i++) {
             if (t->processes[i]) {
@@ -1396,66 +1701,16 @@ static int collect_sample(tracker_t *t) {
     return 0;
 }
 
-/* ===== JSON output ===== */
+/* ===== JSON streaming output ===== */
 
-static void write_json_output(tracker_t *t, const char *workload, const char *output_file) {
-    FILE *f = output_file ? fopen(output_file, "w") : stdout;
-    if (!f) {
-        fprintf(stderr, "Failed to open output file: %s\n", strerror(errno));
-        return;
-    }
-
-    /* Calculate rates for timeline */
-    double *rates = NULL;
-    int *cumulative = NULL;
-    double avg_rate = 0, peak_rate = 0;
-
-    if (t->sample_count > 0) {
-        rates = calloc(t->sample_count, sizeof(double));
-        cumulative = calloc(t->sample_count, sizeof(int));
-
-        cumulative[0] = t->samples[0].page_count;
-        rates[0] = 0;
-
-        for (int i = 1; i < t->sample_count; i++) {
-            cumulative[i] = cumulative[i-1] + t->samples[i].page_count;
-            double delta_time = (t->samples[i].timestamp_ms - t->samples[i-1].timestamp_ms) / 1000.0;
-            if (delta_time > 0) {
-                rates[i] = t->samples[i].page_count / delta_time;
-            }
-        }
-
-        /* Calculate avg and peak rates */
-        double rate_sum = 0;
-        int positive_count = 0;
-        for (int i = 0; i < t->sample_count; i++) {
-            if (rates[i] > 0) {
-                rate_sum += rates[i];
-                positive_count++;
-                if (rates[i] > peak_rate) peak_rate = rates[i];
-            }
-        }
-        if (positive_count > 0) avg_rate = rate_sum / positive_count;
-    }
-
-    /* Calculate VMA distribution */
-    int total_vma_events = 0;
-    for (int i = 0; i < 7; i++) total_vma_events += t->vma_type_counts[i];
-
-    /* Determine max processes tracked across all samples */
-    int max_processes_tracked = 0;
-    for (int s = 0; s < t->sample_count; s++) {
-        if (t->samples[s].pids_tracked_count > max_processes_tracked) {
-            max_processes_tracked = t->samples[s].pids_tracked_count;
-        }
-    }
+static void write_json_header(tracker_t *t, const char *workload) {
+    FILE *f = t->output_fp;
+    if (!f) return;
 
     fprintf(f, "{\n");
     fprintf(f, "  \"workload\": \"%s\",\n", workload);
     fprintf(f, "  \"root_pid\": %d,\n", t->root_pid);
     fprintf(f, "  \"track_children\": %s,\n", t->track_children ? "true" : "false");
-    fprintf(f, "  \"tracking_duration_ms\": %.3f,\n",
-            t->sample_count > 0 ? t->samples[t->sample_count - 1].timestamp_ms : 0.0);
     fprintf(f, "  \"page_size\": %lu,\n", (unsigned long)PAGE_SIZE);
 
     /* pagemap_scan_used: true if root process uses it */
@@ -1465,76 +1720,155 @@ static void write_json_output(tracker_t *t, const char *workload, const char *ou
     }
     fprintf(f, "  \"pagemap_scan_used\": %s,\n", root_uses_pagemap ? "true" : "false");
     fprintf(f, "  \"clear_on_scan\": %s,\n", t->no_clear ? "false" : "true");
-
     fprintf(f, "  \"dual_channel\": %s,\n", t->dual_channel ? "true" : "false");
 
-    /* Samples */
+    /* Tracking mode for OoH comparison */
+    const char *tracking_mode = "uffd-wp-async";
+    if (t->sd_only) tracking_mode = "sd-only";
+    else if (t->uffd_sync) tracking_mode = "uffd-sync";
+    else if (t->no_clear) tracking_mode = "soft-dirty-readonly";
+    fprintf(f, "  \"tracking_mode\": \"%s\",\n", tracking_mode);
+
     fprintf(f, "  \"samples\": [\n");
-    for (int s = 0; s < t->sample_count; s++) {
-        sample_t *sample = &t->samples[s];
-        fprintf(f, "    {\n");
-        fprintf(f, "      \"timestamp_ms\": %.3f,\n", sample->timestamp_ms);
+    fflush(f);
+}
 
-        if (t->dual_channel) {
-            /* Dual-channel: wp_channel + sd_channel */
-            fprintf(f, "      \"wp_channel\": {\n");
-            fprintf(f, "        \"dirty_pages\": [\n");
-            for (int p = 0; p < sample->page_count; p++) {
-                dirty_page_t *page = &sample->pages[p];
-                fprintf(f, "          {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
-                        page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
-                        p < sample->page_count - 1 ? "," : "");
-            }
-            fprintf(f, "        ],\n");
-            fprintf(f, "        \"dirty_count\": %d,\n", sample->page_count);
-            fprintf(f, "        \"dirty_size_bytes\": %lu\n", (unsigned long)sample->page_count * PAGE_SIZE);
-            fprintf(f, "      },\n");
+static void write_sample_json(FILE *f, tracker_t *t, sample_t *sample) {
+    fprintf(f, "    {\n");
+    fprintf(f, "      \"timestamp_ms\": %.3f,\n", sample->timestamp_ms);
 
-            fprintf(f, "      \"sd_channel\": {\n");
-            fprintf(f, "        \"dirty_pages\": [\n");
-            for (int p = 0; p < sample->sd_page_count; p++) {
-                dirty_page_t *page = &sample->sd_pages[p];
-                fprintf(f, "          {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
-                        page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
-                        p < sample->sd_page_count - 1 ? "," : "");
-            }
-            fprintf(f, "        ],\n");
-            fprintf(f, "        \"dirty_count\": %d,\n", sample->sd_page_count);
-            fprintf(f, "        \"dirty_size_bytes\": %lu\n", (unsigned long)sample->sd_page_count * PAGE_SIZE);
-            fprintf(f, "      },\n");
-        } else {
-            /* Single-channel: original format */
-            fprintf(f, "      \"dirty_pages\": [\n");
-            for (int p = 0; p < sample->page_count; p++) {
-                dirty_page_t *page = &sample->pages[p];
-                fprintf(f, "        {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
-                        page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
-                        p < sample->page_count - 1 ? "," : "");
-            }
-            fprintf(f, "      ],\n");
-            fprintf(f, "      \"delta_dirty_count\": %d,\n", sample->page_count);
+    if (t->dual_channel) {
+        /* Dual-channel: wp_channel + sd_channel */
+        fprintf(f, "      \"wp_channel\": {\n");
+        fprintf(f, "        \"dirty_pages\": [\n");
+        for (int p = 0; p < sample->page_count; p++) {
+            dirty_page_t *page = &sample->pages[p];
+            fprintf(f, "          {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
+                    page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
+                    p < sample->page_count - 1 ? "," : "");
         }
+        fprintf(f, "        ],\n");
+        fprintf(f, "        \"dirty_count\": %d,\n", sample->page_count);
+        fprintf(f, "        \"dirty_size_bytes\": %lu\n", (unsigned long)sample->page_count * PAGE_SIZE);
+        fprintf(f, "      },\n");
 
-        /* pids_tracked array */
-        fprintf(f, "      \"pids_tracked\": [");
-        for (int p = 0; p < sample->pids_tracked_count; p++) {
-            fprintf(f, "%d%s", sample->pids_tracked[p],
-                    p < sample->pids_tracked_count - 1 ? ", " : "");
+        fprintf(f, "      \"sd_channel\": {\n");
+        fprintf(f, "        \"dirty_pages\": [\n");
+        for (int p = 0; p < sample->sd_page_count; p++) {
+            dirty_page_t *page = &sample->sd_pages[p];
+            fprintf(f, "          {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
+                    page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
+                    p < sample->sd_page_count - 1 ? "," : "");
         }
-        fprintf(f, "],\n");
-        fprintf(f, "      \"rss_bytes\": %ld,\n", sample->rss_bytes);
-        fprintf(f, "      \"writable_vma_bytes\": %ld\n", sample->writable_vma_bytes);
-        fprintf(f, "    }%s\n", s < t->sample_count - 1 ? "," : "");
+        fprintf(f, "        ],\n");
+        fprintf(f, "        \"dirty_count\": %d,\n", sample->sd_page_count);
+        fprintf(f, "        \"dirty_size_bytes\": %lu\n", (unsigned long)sample->sd_page_count * PAGE_SIZE);
+        fprintf(f, "      },\n");
+    } else {
+        /* Single-channel: original format */
+        fprintf(f, "      \"dirty_pages\": [\n");
+        for (int p = 0; p < sample->page_count; p++) {
+            dirty_page_t *page = &sample->pages[p];
+            fprintf(f, "        {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
+                    page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
+                    p < sample->page_count - 1 ? "," : "");
+        }
+        fprintf(f, "      ],\n");
+        fprintf(f, "      \"delta_dirty_count\": %d,\n", sample->page_count);
     }
-    fprintf(f, "  ],\n");
 
-    /* Summary */
+    /* pids_tracked array */
+    fprintf(f, "      \"pids_tracked\": [");
+    for (int p = 0; p < sample->pids_tracked_count; p++) {
+        fprintf(f, "%d%s", sample->pids_tracked[p],
+                p < sample->pids_tracked_count - 1 ? ", " : "");
+    }
+    fprintf(f, "],\n");
+    fprintf(f, "      \"rss_bytes\": %ld,\n", sample->rss_bytes);
+    fprintf(f, "      \"writable_vma_bytes\": %ld\n", sample->writable_vma_bytes);
+    fprintf(f, "    }");
+}
+
+static void flush_and_free_sample(tracker_t *t, sample_t *sample) {
+    /* 1. Rate calculation */
+    double rate = 0;
+    if (t->sample_count > 1 && t->prev_timestamp_ms > 0) {
+        double dt = (sample->timestamp_ms - t->prev_timestamp_ms) / 1000.0;
+        if (dt > 0) rate = (double)sample->page_count / dt;
+    }
+
+    /* 2. Update incremental summary */
+    t->cumulative_dirty += sample->page_count;
+    if (rate > 0) {
+        t->sum_rate += rate;
+        t->rate_count++;
+        if (rate > t->peak_rate) t->peak_rate = rate;
+    }
+
+    /* 3. Accumulate timeline entry */
+    if (t->timeline_count >= t->timeline_capacity) {
+        t->timeline_capacity *= 2;
+        t->timeline = realloc(t->timeline, t->timeline_capacity * sizeof(timeline_entry_t));
+    }
+    if (t->timeline) {
+        t->timeline[t->timeline_count++] = (timeline_entry_t){
+            .timestamp_ms = sample->timestamp_ms,
+            .rate_pages_per_sec = rate,
+            .cumulative_pages = t->cumulative_dirty,
+            .processes_tracked = sample->pids_tracked_count
+        };
+    }
+
+    /* 4. Write to output (unless --no-output) */
+    if (!t->no_output && t->output_fp) {
+        if (t->samples_written > 0) fprintf(t->output_fp, ",\n");
+        write_sample_json(t->output_fp, t, sample);
+        t->samples_written++;
+    }
+
+    /* 5. Free sample memory */
+    free(sample->pages);      sample->pages = NULL;
+    free(sample->sd_pages);   sample->sd_pages = NULL;
+    free(sample->pids_tracked); sample->pids_tracked = NULL;
+
+    t->prev_timestamp_ms = sample->timestamp_ms;
+}
+
+static void write_json_footer(tracker_t *t) {
+    FILE *f = t->output_fp;
+    if (!f) return;
+
+    /* Close samples array */
+    fprintf(f, "\n  ],\n");
+
+    /* tracking_duration_ms from last timeline entry */
+    double tracking_duration = 0;
+    if (t->timeline_count > 0) {
+        tracking_duration = t->timeline[t->timeline_count - 1].timestamp_ms;
+    }
+    fprintf(f, "  \"tracking_duration_ms\": %.3f,\n", tracking_duration);
+
+    /* Summary (using incremental stats) */
+    double avg_rate = t->rate_count > 0 ? t->sum_rate / t->rate_count : 0;
+
+    /* Calculate VMA distribution */
+    int total_vma_events = 0;
+    for (int i = 0; i < 7; i++) total_vma_events += t->vma_type_counts[i];
+
+    /* max_processes_tracked from timeline */
+    int max_processes_tracked = 0;
+    for (int i = 0; i < t->timeline_count; i++) {
+        if (t->timeline[i].processes_tracked > max_processes_tracked) {
+            max_processes_tracked = t->timeline[i].processes_tracked;
+        }
+    }
+
     fprintf(f, "  \"summary\": {\n");
     fprintf(f, "    \"total_unique_pages\": %d,\n", t->unique_count);
     fprintf(f, "    \"total_dirty_events\": %d,\n", t->total_dirty_pages);
     fprintf(f, "    \"total_dirty_size_bytes\": %lu,\n", (unsigned long)t->total_dirty_pages * PAGE_SIZE);
     fprintf(f, "    \"avg_dirty_rate_per_sec\": %.2f,\n", avg_rate);
-    fprintf(f, "    \"peak_dirty_rate\": %.2f,\n", peak_rate);
+    fprintf(f, "    \"peak_dirty_rate\": %.2f,\n", t->peak_rate);
 
     /* VMA distribution (ratios) */
     fprintf(f, "    \"vma_distribution\": {");
@@ -1575,27 +1909,22 @@ static void write_json_output(tracker_t *t, const char *workload, const char *ou
         fprintf(f, "%d%s", t->known_pids[i], i < t->known_pid_count - 1 ? ", " : "");
     }
     fprintf(f, "]\n");
-
     fprintf(f, "  },\n");
 
-    /* Dirty rate timeline */
+    /* Dirty rate timeline (from accumulated lightweight entries) */
     fprintf(f, "  \"dirty_rate_timeline\": [\n");
-    for (int i = 0; i < t->sample_count; i++) {
+    for (int i = 0; i < t->timeline_count; i++) {
         fprintf(f, "    {\"timestamp_ms\": %.3f, \"rate_pages_per_sec\": %.2f, \"cumulative_pages\": %d, \"processes_tracked\": %d}%s\n",
-                t->samples[i].timestamp_ms,
-                rates ? rates[i] : 0.0,
-                cumulative ? cumulative[i] : 0,
-                t->samples[i].pids_tracked_count,
-                i < t->sample_count - 1 ? "," : "");
+                t->timeline[i].timestamp_ms,
+                t->timeline[i].rate_pages_per_sec,
+                t->timeline[i].cumulative_pages,
+                t->timeline[i].processes_tracked,
+                i < t->timeline_count - 1 ? "," : "");
     }
     fprintf(f, "  ]\n");
 
     fprintf(f, "}\n");
-
-    free(rates);
-    free(cumulative);
-
-    if (output_file) fclose(f);
+    fflush(f);
 }
 
 static void print_usage(const char *prog) {
@@ -1611,6 +1940,9 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  -S, --sd-clear           Clear soft-dirty after each dual-channel scan (delta mode)\n");
     fprintf(stderr, "  -C, --no-track-children  Don't track child/descendant processes\n");
     fprintf(stderr, "  -E, --exclude-pid PID    Exclude PID from tracking (can be repeated)\n");
+    fprintf(stderr, "  -O, --sd-only            Soft-dirty clear+read only, no uffd (OoH /proc comparison)\n");
+    fprintf(stderr, "  -Y, --uffd-sync          Userfaultfd synchronous WP mode (OoH ufd comparison)\n");
+    fprintf(stderr, "  -Q, --no-output          Scan+track but don't store/write dirty page data\n");
     fprintf(stderr, "  -h, --help               Show this help\n");
     fprintf(stderr, "\nModes:\n");
     fprintf(stderr, "  Default: Uses uffd-wp + PM_SCAN_WP_MATCHING for atomic scan+clear.\n");
@@ -1621,6 +1953,10 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  --dual-channel: Collects both WP (delta) and soft-dirty (cumulative) per sample.\n");
     fprintf(stderr, "  --dual-channel --sd-clear: Both channels in delta mode (clears soft-dirty too).\n");
     fprintf(stderr, "                             WARNING: --sd-clear interferes with CRIU tracking.\n");
+    fprintf(stderr, "  --sd-only: Soft-dirty clear_refs + pagemap read (no uffd-wp). OoH /proc method.\n");
+    fprintf(stderr, "             Each interval: read soft-dirty -> clear soft-dirty -> next interval.\n");
+    fprintf(stderr, "  --uffd-sync: Userfaultfd synchronous WP (no WP_ASYNC). OoH ufd method.\n");
+    fprintf(stderr, "               Each write faults into handler thread (~15x overhead).\n");
     fprintf(stderr, "\nChild process tracking:\n");
     fprintf(stderr, "  By default, descendant processes are automatically discovered and tracked.\n");
     fprintf(stderr, "  Use --no-track-children to only track the root PID.\n");
@@ -1637,6 +1973,9 @@ int main(int argc, char *argv[]) {
     bool dual_channel = false;
     bool sd_clear = false;
     bool track_children = true;
+    bool sd_only = false;
+    bool uffd_sync = false;
+    bool no_output = false;
     pid_t exclude_pids[64];
     int exclude_pid_count = 0;
 
@@ -1651,12 +1990,15 @@ int main(int argc, char *argv[]) {
         {"sd-clear", no_argument, 0, 'S'},
         {"no-track-children", no_argument, 0, 'C'},
         {"exclude-pid", required_argument, 0, 'E'},
+        {"sd-only", no_argument, 0, 'O'},
+        {"uffd-sync", no_argument, 0, 'Y'},
+        {"no-output", no_argument, 0, 'Q'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:i:d:o:w:nDSCE:h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:i:d:o:w:nDSCE:OYQh", long_options, NULL)) != -1) {
         switch (opt) {
             case 'p': pid = atoi(optarg); break;
             case 'i': interval_ms = atoi(optarg); break;
@@ -1667,6 +2009,9 @@ int main(int argc, char *argv[]) {
             case 'D': dual_channel = true; break;
             case 'S': sd_clear = true; break;
             case 'C': track_children = false; break;
+            case 'O': sd_only = true; break;
+            case 'Y': uffd_sync = true; break;
+            case 'Q': no_output = true; break;
             case 'E':
                 if (exclude_pid_count < 64) {
                     exclude_pids[exclude_pid_count++] = (pid_t)atoi(optarg);
@@ -1701,8 +2046,17 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: --sd-clear requires --dual-channel\n");
         return 1;
     }
+    if (sd_only && (dual_channel || no_clear || uffd_sync)) {
+        fprintf(stderr, "Error: --sd-only is incompatible with --dual-channel, --no-clear, --uffd-sync\n");
+        return 1;
+    }
+    if (uffd_sync && (dual_channel || no_clear)) {
+        fprintf(stderr, "Error: --uffd-sync is incompatible with --dual-channel, --no-clear\n");
+        return 1;
+    }
 
-    if (tracker_init(&tracker, pid, interval_ms, no_clear, dual_channel, sd_clear, track_children) < 0) {
+    if (tracker_init(&tracker, pid, interval_ms, no_clear, dual_channel, sd_clear,
+                     track_children, sd_only, uffd_sync, no_output) < 0) {
         return 1;
     }
 
@@ -1712,8 +2066,13 @@ int main(int argc, char *argv[]) {
     }
     tracker.exclude_pid_count = exclude_pid_count;
 
-    fprintf(stderr, "Tracking PID %d for %d seconds (interval=%dms, clear=%s%s%s)\n",
-            pid, duration_sec, interval_ms, no_clear ? "off" : "on",
+    const char *mode_str = "uffd-wp-async";
+    if (sd_only) mode_str = "sd-only";
+    else if (uffd_sync) mode_str = "uffd-sync";
+    else if (no_clear) mode_str = "soft-dirty-readonly";
+
+    fprintf(stderr, "Tracking PID %d for %d seconds (interval=%dms, mode=%s%s%s)\n",
+            pid, duration_sec, interval_ms, mode_str,
             dual_channel ? ", dual-channel" : "",
             track_children ? ", track-children" : "");
 
@@ -1731,6 +2090,14 @@ int main(int argc, char *argv[]) {
      * dual-channel mode explicitly opts into soft-dirty clearing for
      * delta comparison between channels.
      */
+    if (sd_only) {
+        for (int i = 0; i < tracker.process_count; i++) {
+            if (tracker.processes[i]) {
+                clear_soft_dirty_for_process(tracker.processes[i]);
+            }
+        }
+        fprintf(stderr, "Cleared soft-dirty for baseline (--sd-only)\n");
+    }
     if (dual_channel && sd_clear) {
         for (int i = 0; i < tracker.process_count; i++) {
             if (tracker.processes[i]) {
@@ -1738,6 +2105,17 @@ int main(int argc, char *argv[]) {
             }
         }
         fprintf(stderr, "Cleared soft-dirty for baseline (--sd-clear)\n");
+    }
+
+    /* Open output file for streaming */
+    if (!no_output) {
+        tracker.output_fp = output_file ? fopen(output_file, "w") : stdout;
+        if (!tracker.output_fp) {
+            fprintf(stderr, "Failed to open output file: %s\n", strerror(errno));
+            tracker_cleanup(&tracker);
+            return 1;
+        }
+        write_json_header(&tracker, workload);
     }
 
     /* Start tracking */
@@ -1764,17 +2142,22 @@ int main(int argc, char *argv[]) {
         }
 
         sample_count++;
+
+        /* Progress report (before flush frees the data) */
         if (sample_count % 10 == 0) {
-            sample_t *last = &tracker.samples[tracker.sample_count - 1];
+            sample_t *cur = &tracker.current_sample;
             if (tracker.dual_channel) {
                 fprintf(stderr, "Sample %d: wp=%d sd=%d dirty pages, %d processes\n",
-                        sample_count, last->page_count, last->sd_page_count,
-                        last->pids_tracked_count);
+                        sample_count, cur->page_count, cur->sd_page_count,
+                        cur->pids_tracked_count);
             } else {
                 fprintf(stderr, "Sample %d: %d dirty pages, %d processes\n",
-                        sample_count, last->page_count, last->pids_tracked_count);
+                        sample_count, cur->page_count, cur->pids_tracked_count);
             }
         }
+
+        /* Flush sample to output + free memory */
+        flush_and_free_sample(&tracker, &tracker.current_sample);
 
         /* Sleep for remaining interval */
         struct timespec iter_end;
@@ -1797,11 +2180,14 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Stopped tracking (total %d samples, %d processes seen)\n",
             tracker.sample_count, tracker.known_pid_count);
 
-    /* Write output */
-    write_json_output(&tracker, workload, output_file);
-
-    if (output_file) {
-        fprintf(stderr, "Output written to %s\n", output_file);
+    /* Write footer + close output */
+    if (!no_output && tracker.output_fp) {
+        write_json_footer(&tracker);
+        if (output_file) {
+            fclose(tracker.output_fp);
+            tracker.output_fp = NULL;
+            fprintf(stderr, "Output written to %s\n", output_file);
+        }
     }
 
     tracker_cleanup(&tracker);

@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -O2 -std=gnu11
-LDFLAGS =
+LDFLAGS = -lpthread
 
 TARGET = dirty_tracker
 SRC = main.c

@@ -228,6 +228,7 @@ def run_xgboost_workload(
     # Training loop
     model = None
     round_num = 0
+    metric_printed = False
     max_rounds = num_rounds if num_rounds > 0 else 1000000
     start_time = time.time()
     last_report_time = start_time
@@ -248,11 +249,17 @@ def run_xgboost_workload(
             print(f"[XGBoost]   Training history length: {len(eval_results)}")
             print(f"[XGBoost]   Elapsed time: {elapsed:.1f}s")
             print(f"[XGBoost] ==========================================")
+            rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
+            print(f"[METRIC] throughput {rounds_per_sec:.1f} rounds/s")
             sys.exit(0)
 
         # Duration check
         elapsed = time.time() - start_time
         if duration > 0 and elapsed >= duration:
+            if not metric_printed:
+                rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
+                print(f"[METRIC] throughput {rounds_per_sec:.1f} rounds/s")
+                metric_printed = True
             time.sleep(1)
             continue
 
@@ -300,6 +307,8 @@ def run_xgboost_workload(
                 print(f"[XGBoost]   Final {eval_metric}: {eval_results[-1]:.6f}")
             print(f"[XGBoost]   Elapsed time: {elapsed:.1f}s")
             print(f"[XGBoost] ==========================================")
+            rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
+            print(f"[METRIC] throughput {rounds_per_sec:.1f} rounds/s")
             sys.exit(0)
         time.sleep(1)
 
