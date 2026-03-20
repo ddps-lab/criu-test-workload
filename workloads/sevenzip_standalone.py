@@ -133,7 +133,7 @@ def start_compression(input_file: str, output_file: str,
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        preexec_fn=os.setsid,
+        # preexec_fn=os.setsid,  # removed: tracker needs child visibility
     )
     return process
 
