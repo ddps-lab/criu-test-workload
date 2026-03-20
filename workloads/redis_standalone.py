@@ -148,14 +148,23 @@ def check_ycsb_installed(ycsb_home: str) -> bool:
 
 
 def get_ycsb_bin(ycsb_home: str) -> str:
-    """Get the YCSB binary path."""
-    ycsb_bin = os.path.join(ycsb_home, 'bin', 'ycsb')
-    if os.path.exists(ycsb_bin):
-        return ycsb_bin
+    """Get the YCSB binary path. Prefer ycsb.sh (bash) over ycsb (python2)."""
     ycsb_sh = os.path.join(ycsb_home, 'bin', 'ycsb.sh')
     if os.path.exists(ycsb_sh):
         return ycsb_sh
-    return ycsb_bin  # will fail with clear error
+    ycsb_bin = os.path.join(ycsb_home, 'bin', 'ycsb')
+    if os.path.exists(ycsb_bin):
+        return ycsb_bin
+    return ycsb_sh  # will fail with clear error
+
+
+
+
+
+
+
+
+
 
 
 def create_ycsb_properties(
