@@ -1,0 +1,55 @@
+# Copy this file to variables.tf and fill in your values
+# cp variables.tf.sample variables.tf
+
+variable "region" {
+  default = "us-west-2"
+}
+
+variable "ami_id" {
+  description = "Pre-built AMI with criu_workload + dependencies"
+  type        = string
+  # See ami/README.md for build instructions
+  default = "ami-XXXXXXXXX"
+}
+
+variable "key_name" {
+  description = "SSH key pair name"
+  type        = string
+  default     = "your-key-pair-name"
+}
+
+variable "instance_type" {
+  default = "m5.xlarge"
+}
+
+variable "s3_bucket" {
+  description = "S3 bucket for experiment results"
+  default     = "ddps-criu-experiments"
+}
+
+variable "experiments" {
+  description = "List of experiments to run"
+  type = list(object({
+    name     = string
+    workload = string
+    configs  = string
+    extra    = string # workload-specific args
+  }))
+  default = [
+    # 1000ms interval
+    { name = "redis_1000ms", workload = "redis", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--ycsb-workload a --record-count 100000" },
+    { name = "matmul_1000ms", workload = "matmul", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--matrix-size 2048" },
+    { name = "xgboost_1000ms", workload = "xgboost", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000" },
+    { name = "memwrite_1000ms", workload = "memwrite", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "" },
+    # 1ms interval (no uffd-sync)
+    { name = "redis_1ms", workload = "redis", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--ycsb-workload a --record-count 100000" },
+    { name = "matmul_1ms", workload = "matmul", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--matrix-size 2048" },
+    { name = "xgboost_1ms", workload = "xgboost", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000" },
+    { name = "memwrite_1ms", workload = "memwrite", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "" },
+    # 10000ms interval
+    { name = "redis_10000ms", workload = "redis", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--ycsb-workload a --record-count 100000" },
+    { name = "matmul_10000ms", workload = "matmul", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--matrix-size 2048" },
+    { name = "xgboost_10000ms", workload = "xgboost", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000" },
+    { name = "memwrite_10000ms", workload = "memwrite", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "" },
+  ]
+}
