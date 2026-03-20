@@ -147,6 +147,7 @@ typedef struct {
     pthread_t sync_handler_thread;  /* fault handler thread */
     volatile bool sync_handler_running; /* handler thread is active */
     volatile bool stop_sync_handler;    /* signal to stop handler thread */
+    volatile bool pause_sync_handler;   /* pause handler during collect_sample re-protect */
 
     /* Per-process VMAs */
     vma_info_t *vmas;
@@ -1022,6 +1023,12 @@ static void *uffd_sync_handler(void *arg) {
     unsigned long poll_timeout_count = 0;
 
     while (!pt->stop_sync_handler) {
+        /* Pause during collect_sample snapshot + re-protect to prevent race */
+        if (pt->pause_sync_handler) {
+            usleep(100);
+            continue;
+        }
+
         struct pollfd pfd = { .fd = pt->tracker_uffd_fd, .events = POLLIN };
         int ret = poll(&pfd, 1, 100);  /* 100ms timeout for stop check */
         if (ret <= 0) {
@@ -1602,7 +1609,13 @@ static int collect_sample(tracker_t *t) {
             /* sd-only mode: soft-dirty read + clear (no uffd) */
             ret = read_dirty_pages_soft_dirty(t, pt, sample);
         } else if (t->uffd_sync && pt->tracker_uffd_fd >= 0) {
-            /* uffd-sync mode: snapshot dirty set from handler thread */
+            /* uffd-sync mode: pause handler → snapshot → re-protect → resume */
+
+            /* 1. Pause handler to prevent unprotect during re-protect */
+            pt->pause_sync_handler = true;
+            usleep(1000);  /* 1ms: let in-flight ioctl complete */
+
+            /* 2. Snapshot dirty set */
             pthread_mutex_lock(&pt->sync_dirty.lock);
             for (size_t di = 0; di < pt->sync_dirty.count; di++) {
                 if (sample->page_count >= 65536) break;
@@ -1634,7 +1647,7 @@ static int collect_sample(tracker_t *t) {
             pt->sync_dirty.count = 0;
             pthread_mutex_unlock(&pt->sync_dirty.lock);
 
-            /* Re-protect all writable VMAs for next interval */
+            /* 3. Re-protect all writable VMAs (handler paused, no race) */
             for (int v = 0; v < pt->vma_count; v++) {
                 if (!strchr(pt->vmas[v].perms, 'w')) continue;
                 if (!strchr(pt->vmas[v].perms, 'p')) continue;
@@ -1646,6 +1659,9 @@ static int collect_sample(tracker_t *t) {
                 };
                 ioctl(pt->tracker_uffd_fd, UFFDIO_WRITEPROTECT, &wp);
             }
+
+            /* 4. Resume handler */
+            pt->pause_sync_handler = false;
         } else if (t->uffd_sync && !pt->wp_initialized) {
             /* uffd-sync mode: first call — setup uffd-wp + sync handler */
             if (setup_userfaultfd_wp_for_process(pt, true) == 0) {

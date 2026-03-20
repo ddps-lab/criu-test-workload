@@ -66,6 +66,9 @@ EXPERIMENT_CONFIGS = {
     'sd-clear-1000ms': {'tracker_mode': 'sd-clear', 'interval_ms': 1000},
 
     'uffd-wp-setup-only': {'tracker_mode': 'uffd-wp', 'interval_ms': 60000},
+    "uffd-wp-10000ms":  {"tracker_mode": "uffd-wp",  "interval_ms": 10000},
+    "sd-only-10000ms": {"tracker_mode": "sd-only",  "interval_ms": 10000},
+    "uffd-sync-10000ms": {"tracker_mode": "uffd-sync", "interval_ms": 10000},
     "uffd-wp-1ms":    {"tracker_mode": "uffd-wp",  "interval_ms": 1},
     "sd-only-1ms":    {"tracker_mode": "sd-only",  "interval_ms": 1},
     "uffd-sync-1ms":  {"tracker_mode": "uffd-sync", "interval_ms": 1},
