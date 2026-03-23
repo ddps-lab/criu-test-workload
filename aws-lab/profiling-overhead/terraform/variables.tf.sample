@@ -33,23 +33,45 @@ variable "experiments" {
     name     = string
     workload = string
     configs  = string
-    extra    = string # workload-specific args
+    extra    = string
+    duration = number
+    repeats  = number
   }))
   default = [
-    # 1000ms interval
-    { name = "redis_1000ms", workload = "redis", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--ycsb-workload a --record-count 100000" },
-    { name = "matmul_1000ms", workload = "matmul", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--matrix-size 2048" },
-    { name = "xgboost_1000ms", workload = "xgboost", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000" },
-    { name = "memwrite_1000ms", workload = "memwrite", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "" },
-    # 1ms interval (no uffd-sync)
-    { name = "redis_1ms", workload = "redis", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--ycsb-workload a --record-count 100000" },
-    { name = "matmul_1ms", workload = "matmul", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--matrix-size 2048" },
-    { name = "xgboost_1ms", workload = "xgboost", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000" },
-    { name = "memwrite_1ms", workload = "memwrite", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "" },
-    # 10000ms interval
-    { name = "redis_10000ms", workload = "redis", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--ycsb-workload a --record-count 100000" },
-    { name = "matmul_10000ms", workload = "matmul", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--matrix-size 2048" },
-    { name = "xgboost_10000ms", workload = "xgboost", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000" },
-    { name = "memwrite_10000ms", workload = "memwrite", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "" },
+    # 1ms interval (duration=60s, repeats=10)
+    { name = "redis_1ms", workload = "redis", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--ycsb-workload a --record-count 100000", duration = 60, repeats = 10 },
+    { name = "matmul_1ms", workload = "matmul", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--matrix-size 2048", duration = 60, repeats = 10 },
+    { name = "xgboost_1ms", workload = "xgboost", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000", duration = 60, repeats = 10 },
+    { name = "memwrite_1ms", workload = "memwrite", configs = "baseline,uffd-wp-1ms,sd-only-1ms", extra = "", duration = 60, repeats = 10 },
+    # 1000ms interval (duration=60s, repeats=10)
+    { name = "redis_1000ms", workload = "redis", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--ycsb-workload a --record-count 100000", duration = 60, repeats = 10 },
+    { name = "matmul_1000ms", workload = "matmul", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--matrix-size 2048", duration = 60, repeats = 10 },
+    { name = "xgboost_1000ms", workload = "xgboost", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000", duration = 60, repeats = 10 },
+    { name = "memwrite_1000ms", workload = "memwrite", configs = "baseline,uffd-wp-1000ms,sd-only-1000ms,uffd-sync-1000ms", extra = "", duration = 60, repeats = 10 },
+    # 10s interval (duration=60s, repeats=10)
+    { name = "redis_10000ms", workload = "redis", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--ycsb-workload a --record-count 100000", duration = 60, repeats = 10 },
+    { name = "matmul_10000ms", workload = "matmul", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--matrix-size 2048", duration = 60, repeats = 10 },
+    { name = "xgboost_10000ms", workload = "xgboost", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000", duration = 60, repeats = 10 },
+    { name = "memwrite_10000ms", workload = "memwrite", configs = "baseline,uffd-wp-10000ms,sd-only-10000ms,uffd-sync-10000ms", extra = "", duration = 60, repeats = 10 },
+    # 1min interval (duration=300s, repeats=3)
+    { name = "redis_60000ms", workload = "redis", configs = "baseline,uffd-wp-60000ms,sd-only-60000ms,uffd-sync-60000ms", extra = "--ycsb-workload a --record-count 100000", duration = 300, repeats = 3 },
+    { name = "matmul_60000ms", workload = "matmul", configs = "baseline,uffd-wp-60000ms,sd-only-60000ms,uffd-sync-60000ms", extra = "--matrix-size 2048", duration = 300, repeats = 3 },
+    { name = "xgboost_60000ms", workload = "xgboost", configs = "baseline,uffd-wp-60000ms,sd-only-60000ms,uffd-sync-60000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000", duration = 300, repeats = 3 },
+    { name = "memwrite_60000ms", workload = "memwrite", configs = "baseline,uffd-wp-60000ms,sd-only-60000ms,uffd-sync-60000ms", extra = "", duration = 300, repeats = 3 },
+    # 3min interval (duration=900s, repeats=3)
+    { name = "redis_180000ms", workload = "redis", configs = "baseline,uffd-wp-180000ms,sd-only-180000ms,uffd-sync-180000ms", extra = "--ycsb-workload a --record-count 100000", duration = 900, repeats = 3 },
+    { name = "matmul_180000ms", workload = "matmul", configs = "baseline,uffd-wp-180000ms,sd-only-180000ms,uffd-sync-180000ms", extra = "--matrix-size 2048", duration = 900, repeats = 3 },
+    { name = "xgboost_180000ms", workload = "xgboost", configs = "baseline,uffd-wp-180000ms,sd-only-180000ms,uffd-sync-180000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000", duration = 900, repeats = 3 },
+    { name = "memwrite_180000ms", workload = "memwrite", configs = "baseline,uffd-wp-180000ms,sd-only-180000ms,uffd-sync-180000ms", extra = "", duration = 900, repeats = 3 },
+    # 5min interval (duration=1500s, repeats=3)
+    { name = "redis_300000ms", workload = "redis", configs = "baseline,uffd-wp-300000ms,sd-only-300000ms,uffd-sync-300000ms", extra = "--ycsb-workload a --record-count 100000", duration = 1500, repeats = 3 },
+    { name = "matmul_300000ms", workload = "matmul", configs = "baseline,uffd-wp-300000ms,sd-only-300000ms,uffd-sync-300000ms", extra = "--matrix-size 2048", duration = 1500, repeats = 3 },
+    { name = "xgboost_300000ms", workload = "xgboost", configs = "baseline,uffd-wp-300000ms,sd-only-300000ms,uffd-sync-300000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000", duration = 1500, repeats = 3 },
+    { name = "memwrite_300000ms", workload = "memwrite", configs = "baseline,uffd-wp-300000ms,sd-only-300000ms,uffd-sync-300000ms", extra = "", duration = 1500, repeats = 3 },
+    # 10min interval (duration=1800s, repeats=3)
+    { name = "redis_600000ms", workload = "redis", configs = "baseline,uffd-wp-600000ms,sd-only-600000ms,uffd-sync-600000ms", extra = "--ycsb-workload a --record-count 100000", duration = 1800, repeats = 3 },
+    { name = "matmul_600000ms", workload = "matmul", configs = "baseline,uffd-wp-600000ms,sd-only-600000ms,uffd-sync-600000ms", extra = "--matrix-size 2048", duration = 1800, repeats = 3 },
+    { name = "xgboost_600000ms", workload = "xgboost", configs = "baseline,uffd-wp-600000ms,sd-only-600000ms,uffd-sync-600000ms", extra = "--xgb-dataset synthetic --xgb-num-samples 100000", duration = 1800, repeats = 3 },
+    { name = "memwrite_600000ms", workload = "memwrite", configs = "baseline,uffd-wp-600000ms,sd-only-600000ms,uffd-sync-600000ms", extra = "", duration = 1800, repeats = 3 },
   ]
 }

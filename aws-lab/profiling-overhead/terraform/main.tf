@@ -76,6 +76,8 @@ resource "aws_instance" "experiment" {
     extra_args      = var.experiments[count.index].extra
     s3_bucket       = var.s3_bucket
     region          = var.region
+    duration        = var.experiments[count.index].duration
+    repeats         = var.experiments[count.index].repeats
   })
 
   tags = {
