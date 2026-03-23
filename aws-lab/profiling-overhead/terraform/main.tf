@@ -66,7 +66,7 @@ resource "aws_instance" "experiment" {
   vpc_security_group_ids = [aws_security_group.experiment.id]
 
   root_block_device {
-    volume_size = 30
+    volume_size = 50
   }
 
   user_data = templatefile("${path.module}/userdata.tpl", {

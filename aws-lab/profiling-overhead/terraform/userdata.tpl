@@ -23,7 +23,7 @@ echo "Repeats: $REPEATS"
 cd $WORKLOAD_DIR
 
 # Update code from git
-git pull origin main || true
+rm -rf /opt/criu_workload && git clone --depth 1 https://github.com/ddps-lab/criu-test-workload.git /opt/criu_workload
 cd tools/dirty_tracker_c && make clean && make 2>&1 | tail -1
 cd $WORKLOAD_DIR
 
