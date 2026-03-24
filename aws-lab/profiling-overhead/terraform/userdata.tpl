@@ -39,8 +39,8 @@ sudo python3 experiments/measure_overhead.py \
     --working-dir /tmp/overhead_$EXPERIMENT_NAME
 
 echo "Experiment complete, uploading to S3..."
-/usr/local/bin/aws s3 cp $OUTPUT_FILE s3://$S3_BUCKET/overhead/$EXPERIMENT_NAME.json --region $REGION
-/usr/local/bin/aws s3 cp /var/log/experiment.log s3://$S3_BUCKET/logs/$EXPERIMENT_NAME.log --region $REGION
+$(which aws) s3 cp $OUTPUT_FILE s3://$S3_BUCKET/overhead/$EXPERIMENT_NAME.json --region $REGION
+$(which aws) s3 cp /var/log/experiment.log s3://$S3_BUCKET/logs/$EXPERIMENT_NAME.log --region $REGION
 
 echo "Upload complete, shutting down..."
 sudo shutdown -h now
