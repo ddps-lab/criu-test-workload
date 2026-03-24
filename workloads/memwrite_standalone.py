@@ -68,7 +68,7 @@ def main():
             elapsed = time.time() - start_time
             if iteration > 0 and not metric_printed:
                 iter_per_sec = iteration / elapsed if elapsed > 0 else 0
-                print(f"[METRIC] throughput {iter_per_sec:.2f} iter/s")
+                print(f"[METRIC] throughput {iter_per_sec:.4f} iter/s")
                 metric_printed = True
             print(f"[MemWrite] Restore detected - exiting")
             print(f"[MemWrite] Iterations: {iteration}, Elapsed: {elapsed:.1f}s")
@@ -78,7 +78,7 @@ def main():
         if duration > 0 and elapsed >= duration:
             if not metric_printed:
                 iter_per_sec = iteration / elapsed if elapsed > 0 else 0
-                print(f"[METRIC] throughput {iter_per_sec:.2f} iter/s")
+                print(f"[METRIC] throughput {iter_per_sec:.4f} iter/s")
                 metric_printed = True
             time.sleep(1)
             continue

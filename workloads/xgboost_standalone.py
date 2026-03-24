@@ -250,7 +250,7 @@ def run_xgboost_workload(
             print(f"[XGBoost]   Elapsed time: {elapsed:.1f}s")
             print(f"[XGBoost] ==========================================")
             rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
-            print(f"[METRIC] throughput {rounds_per_sec:.1f} rounds/s")
+            print(f"[METRIC] throughput {rounds_per_sec:.4f} rounds/s")
             sys.exit(0)
 
         # Duration check
@@ -258,7 +258,7 @@ def run_xgboost_workload(
         if duration > 0 and elapsed >= duration:
             if not metric_printed:
                 rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
-                print(f"[METRIC] throughput {rounds_per_sec:.1f} rounds/s")
+                print(f"[METRIC] throughput {rounds_per_sec:.4f} rounds/s")
                 metric_printed = True
             time.sleep(1)
             continue
@@ -308,7 +308,7 @@ def run_xgboost_workload(
             print(f"[XGBoost]   Elapsed time: {elapsed:.1f}s")
             print(f"[XGBoost] ==========================================")
             rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
-            print(f"[METRIC] throughput {rounds_per_sec:.1f} rounds/s")
+            print(f"[METRIC] throughput {rounds_per_sec:.4f} rounds/s")
             sys.exit(0)
         time.sleep(1)
 

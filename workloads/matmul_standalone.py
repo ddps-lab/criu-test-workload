@@ -119,7 +119,7 @@ def run_matmul_workload(
             print(f"[MatMul]   Elapsed time: {elapsed:.1f}s")
             print(f"[MatMul] ==========================================")
             iter_per_sec = iteration / elapsed if elapsed > 0 else 0
-            print(f"[METRIC] throughput {iter_per_sec:.1f} iter/s")
+            print(f"[METRIC] throughput {iter_per_sec:.4f} iter/s")
             sys.exit(0)
 
         # Duration check
@@ -127,7 +127,7 @@ def run_matmul_workload(
         if duration > 0 and elapsed >= duration:
             if not metric_printed:
                 iter_per_sec = iteration / elapsed if elapsed > 0 else 0
-                print(f"[METRIC] throughput {iter_per_sec:.1f} iter/s")
+                print(f"[METRIC] throughput {iter_per_sec:.4f} iter/s")
                 metric_printed = True
             time.sleep(1)
             continue
