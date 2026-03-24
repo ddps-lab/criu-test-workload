@@ -58,9 +58,16 @@ EXPERIMENT_CONFIGS = {
     'baseline': {'tracker_mode': None},
 
     'uffd-wp-100ms':  {'tracker_mode': 'uffd-wp',  'interval_ms': 100},
+    'sd-only-100ms':  {'tracker_mode': 'sd-only',  'interval_ms': 100},
+    'uffd-sync-100ms':{'tracker_mode': 'uffd-sync', 'interval_ms': 100},
     'uffd-wp-500ms':  {'tracker_mode': 'uffd-wp',  'interval_ms': 500},
     'uffd-wp-1000ms': {'tracker_mode': 'uffd-wp',  'interval_ms': 1000},
+    'uffd-wp-3000ms':  {'tracker_mode': 'uffd-wp',  'interval_ms': 3000},
+    'sd-only-3000ms':  {'tracker_mode': 'sd-only',  'interval_ms': 3000},
+    'uffd-sync-3000ms':{'tracker_mode': 'uffd-sync', 'interval_ms': 3000},
     'uffd-wp-5000ms': {'tracker_mode': 'uffd-wp',  'interval_ms': 5000},
+    'sd-only-5000ms':  {'tracker_mode': 'sd-only',  'interval_ms': 5000},
+    'uffd-sync-5000ms':{'tracker_mode': 'uffd-sync', 'interval_ms': 5000},
 
     'sd-clear-500ms':  {'tracker_mode': 'sd-clear', 'interval_ms': 500},
     'sd-clear-1000ms': {'tracker_mode': 'sd-clear', 'interval_ms': 1000},
