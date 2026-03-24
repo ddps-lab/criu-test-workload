@@ -154,6 +154,12 @@ typedef struct {
     int vma_count;
     int vma_capacity;
 
+    /* Registered VMA tracking for re-registration of new VMAs */
+    uint64_t *registered_vma_starts;
+    uint64_t *registered_vma_ends;
+    int registered_vma_count;
+    int registered_vma_capacity;
+
     /* Whether this process supports PAGEMAP_SCAN */
     bool use_pagemap_scan;
 } process_tracker_t;
@@ -460,6 +466,8 @@ static void process_tracker_cleanup(process_tracker_t *pt) {
     if (pt->pagemap_fd >= 0) close(pt->pagemap_fd);
     if (pt->clear_refs_fd >= 0) close(pt->clear_refs_fd);
     free(pt->vmas);
+    free(pt->registered_vma_starts);
+    free(pt->registered_vma_ends);
     free(pt);
 }
 
@@ -821,6 +829,18 @@ static int setup_userfaultfd_wp_for_process(process_tracker_t *pt, bool uffd_syn
                 continue;
             }
             registered++;
+
+            /* Record registered VMA for re-registration tracking */
+            if (pt->registered_vma_count >= pt->registered_vma_capacity) {
+                pt->registered_vma_capacity = pt->registered_vma_capacity ? pt->registered_vma_capacity * 2 : 64;
+                pt->registered_vma_starts = realloc(pt->registered_vma_starts,
+                    pt->registered_vma_capacity * sizeof(uint64_t));
+                pt->registered_vma_ends = realloc(pt->registered_vma_ends,
+                    pt->registered_vma_capacity * sizeof(uint64_t));
+            }
+            pt->registered_vma_starts[pt->registered_vma_count] = vma->start;
+            pt->registered_vma_ends[pt->registered_vma_count] = vma->end;
+            pt->registered_vma_count++;
         }
         fprintf(stderr, "UFFDIO_REGISTER (pid=%d): %d VMAs registered, %d skipped\n",
                 pid, registered, skipped);
@@ -833,6 +853,20 @@ static int setup_userfaultfd_wp_for_process(process_tracker_t *pt, bool uffd_syn
 
     /* Success - don't close uffd (needs to stay open in target for WP to work) */
     pt->target_uffd = uffd;
+
+    /* Copy uffd fd to tracker for VMA re-registration of new VMAs */
+    if (pt->tracker_uffd_fd < 0) {
+        long pidfd = syscall(__NR_pidfd_open, pid, 0);
+        if (pidfd >= 0) {
+            pt->tracker_uffd_fd = (int)syscall(__NR_pidfd_getfd, (int)pidfd, (int)uffd, 0);
+            close((int)pidfd);
+            if (pt->tracker_uffd_fd >= 0) {
+                fprintf(stderr, "pidfd_getfd: uffd fd=%ld -> tracker fd=%d (pid=%d)\n",
+                        uffd, pt->tracker_uffd_fd, pid);
+            }
+        }
+    }
+
     ret = 0;
     goto cleanup_mmap;
 
@@ -1079,23 +1113,25 @@ static void *uffd_sync_handler(void *arg) {
 static int setup_uffd_sync_for_process(process_tracker_t *pt) {
     pid_t pid = pt->pid;
 
-    /* 1. Copy uffd fd from target to tracker via pidfd_getfd */
-    long pidfd = syscall(__NR_pidfd_open, pid, 0);
-    if (pidfd < 0) {
-        fprintf(stderr, "pidfd_open failed (pid=%d): %s\n", pid, strerror(errno));
-        return -1;
-    }
-
-    pt->tracker_uffd_fd = (int)syscall(__NR_pidfd_getfd, (int)pidfd, (int)pt->target_uffd, 0);
-    close((int)pidfd);
-
+    /* 1. Copy uffd fd from target to tracker via pidfd_getfd (skip if already done) */
     if (pt->tracker_uffd_fd < 0) {
-        fprintf(stderr, "pidfd_getfd failed (pid=%d, target_uffd=%ld): %s\n",
-                pid, pt->target_uffd, strerror(errno));
-        return -1;
+        long pidfd = syscall(__NR_pidfd_open, pid, 0);
+        if (pidfd < 0) {
+            fprintf(stderr, "pidfd_open failed (pid=%d): %s\n", pid, strerror(errno));
+            return -1;
+        }
+
+        pt->tracker_uffd_fd = (int)syscall(__NR_pidfd_getfd, (int)pidfd, (int)pt->target_uffd, 0);
+        close((int)pidfd);
+
+        if (pt->tracker_uffd_fd < 0) {
+            fprintf(stderr, "pidfd_getfd failed (pid=%d, target_uffd=%ld): %s\n",
+                    pid, pt->target_uffd, strerror(errno));
+            return -1;
+        }
+        fprintf(stderr, "pidfd_getfd: copied uffd fd=%ld -> tracker fd=%d (pid=%d)\n",
+                pt->target_uffd, pt->tracker_uffd_fd, pid);
     }
-    fprintf(stderr, "pidfd_getfd: copied uffd fd=%ld -> tracker fd=%d (pid=%d)\n",
-            pt->target_uffd, pt->tracker_uffd_fd, pid);
 
     /* 2. Start handler thread BEFORE WP (handler must be ready for immediate faults) */
     pt->stop_sync_handler = false;
@@ -1594,6 +1630,50 @@ static int collect_sample(tracker_t *t) {
 
         /* Parse maps for this process */
         if (parse_maps_for_process(pt) < 0) continue;
+
+        /* Re-register new VMAs that appeared since initial setup */
+        if (pt->tracker_uffd_fd >= 0 && pt->wp_active && !t->sd_only) {
+            for (int v = 0; v < pt->vma_count; v++) {
+                vma_info_t *vma = &pt->vmas[v];
+
+                /* Same filter as setup_userfaultfd_wp_for_process */
+                if (!strchr(vma->perms, 'w')) continue;
+                if (!strchr(vma->perms, 'p')) continue;
+                if (vma->type == VMA_VDSO) continue;
+
+                /* Check if already registered */
+                bool already = false;
+                for (int r = 0; r < pt->registered_vma_count; r++) {
+                    if (pt->registered_vma_starts[r] == vma->start &&
+                        pt->registered_vma_ends[r] == vma->end) {
+                        already = true;
+                        break;
+                    }
+                }
+                if (already) continue;
+
+                /* New VMA — register via tracker's uffd fd */
+                struct uffdio_register reg = {
+                    .range = { .start = vma->start, .len = vma->end - vma->start },
+                    .mode = UFFDIO_REGISTER_MODE_WP,
+                };
+                if (ioctl(pt->tracker_uffd_fd, UFFDIO_REGISTER, &reg) == 0) {
+                    if (pt->registered_vma_count >= pt->registered_vma_capacity) {
+                        pt->registered_vma_capacity = pt->registered_vma_capacity ? pt->registered_vma_capacity * 2 : 64;
+                        pt->registered_vma_starts = realloc(pt->registered_vma_starts,
+                            pt->registered_vma_capacity * sizeof(uint64_t));
+                        pt->registered_vma_ends = realloc(pt->registered_vma_ends,
+                            pt->registered_vma_capacity * sizeof(uint64_t));
+                    }
+                    pt->registered_vma_starts[pt->registered_vma_count] = vma->start;
+                    pt->registered_vma_ends[pt->registered_vma_count] = vma->end;
+                    pt->registered_vma_count++;
+                    fprintf(stderr, "Re-registered new VMA: %s [%lx-%lx] (pid=%d)\n",
+                            vma->pathname, (unsigned long)vma->start, (unsigned long)vma->end, pt->pid);
+                }
+                /* ioctl failure silently ignored (shared VMAs, special mappings) */
+            }
+        }
 
         /* Record this PID */
         sample->pids_tracked[sample->pids_tracked_count++] = pt->pid;
