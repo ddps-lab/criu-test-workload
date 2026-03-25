@@ -771,7 +771,7 @@ static int setup_userfaultfd_wp_for_process(process_tracker_t *pt, bool uffd_syn
     {
         struct uffdio_api api = {
             .api = UFFD_API,
-            .features = uffd_sync_mode ? 0 : UFFD_FEATURE_WP_ASYNC,
+            .features = uffd_sync_mode ? 0 : (UFFD_FEATURE_WP_ASYNC | UFFD_FEATURE_WP_UNPOPULATED),
         };
         if (write_to_target(pid, scratch, &api, sizeof(api)) < 0) {
             fprintf(stderr, "write uffdio_api to target failed\n");
