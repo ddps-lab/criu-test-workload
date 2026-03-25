@@ -236,6 +236,9 @@ typedef struct {
     bool sd_only;          /* --sd-only: soft-dirty clear+read only, no uffd (OoH /proc) */
     bool uffd_sync;        /* --uffd-sync: userfaultfd synchronous WP mode (OoH ufd) */
 
+    /* Verbosity */
+    bool verbose;          /* -v: print per-sample progress and VMA re-register messages */
+
     /* Streaming output */
     FILE *output_fp;            /* opened at start, written incrementally */
     bool no_output;             /* -Q: scan+track but don't store/write page data */
@@ -486,7 +489,7 @@ static void clear_soft_dirty_for_process(process_tracker_t *pt) {
 static int tracker_init(tracker_t *t, pid_t root_pid, int interval_ms,
                         bool no_clear, bool dual_channel, bool sd_clear,
                         bool track_children, bool sd_only, bool uffd_sync,
-                        bool no_output) {
+                        bool no_output, bool verbose) {
     memset(t, 0, sizeof(*t));
 
     t->root_pid = root_pid;
@@ -498,6 +501,7 @@ static int tracker_init(tracker_t *t, pid_t root_pid, int interval_ms,
     t->sd_only = sd_only;
     t->uffd_sync = uffd_sync;
     t->no_output = no_output;
+    t->verbose = verbose;
 
     /* unique_hash is zeroed by memset above */
 
@@ -1668,8 +1672,9 @@ static int collect_sample(tracker_t *t) {
                     pt->registered_vma_starts[pt->registered_vma_count] = vma->start;
                     pt->registered_vma_ends[pt->registered_vma_count] = vma->end;
                     pt->registered_vma_count++;
-                    fprintf(stderr, "Re-registered new VMA: %s [%lx-%lx] (pid=%d)\n",
-                            vma->pathname, (unsigned long)vma->start, (unsigned long)vma->end, pt->pid);
+                    if (t->verbose)
+                        fprintf(stderr, "Re-registered new VMA: %s [%lx-%lx] (pid=%d)\n",
+                                vma->pathname, (unsigned long)vma->start, (unsigned long)vma->end, pt->pid);
                 }
                 /* ioctl failure silently ignored (shared VMAs, special mappings) */
             }
@@ -2039,6 +2044,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  -O, --sd-only            Soft-dirty clear+read only, no uffd (OoH /proc comparison)\n");
     fprintf(stderr, "  -Y, --uffd-sync          Userfaultfd synchronous WP mode (OoH ufd comparison)\n");
     fprintf(stderr, "  -Q, --no-output          Scan+track but don't store/write dirty page data\n");
+    fprintf(stderr, "  -v, --verbose            Print per-sample progress and VMA re-register messages\n");
     fprintf(stderr, "  -h, --help               Show this help\n");
     fprintf(stderr, "\nModes:\n");
     fprintf(stderr, "  Default: Uses uffd-wp + PM_SCAN_WP_MATCHING for atomic scan+clear.\n");
@@ -2072,6 +2078,7 @@ int main(int argc, char *argv[]) {
     bool sd_only = false;
     bool uffd_sync = false;
     bool no_output = false;
+    bool verbose = false;
     pid_t exclude_pids[64];
     int exclude_pid_count = 0;
 
@@ -2089,12 +2096,13 @@ int main(int argc, char *argv[]) {
         {"sd-only", no_argument, 0, 'O'},
         {"uffd-sync", no_argument, 0, 'Y'},
         {"no-output", no_argument, 0, 'Q'},
+        {"verbose", no_argument, 0, 'v'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:i:d:o:w:nDSCE:OYQh", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:i:d:o:w:nDSCE:OYQvh", long_options, NULL)) != -1) {
         switch (opt) {
             case 'p': pid = atoi(optarg); break;
             case 'i': interval_ms = atoi(optarg); break;
@@ -2108,6 +2116,7 @@ int main(int argc, char *argv[]) {
             case 'O': sd_only = true; break;
             case 'Y': uffd_sync = true; break;
             case 'Q': no_output = true; break;
+            case 'v': verbose = true; break;
             case 'E':
                 if (exclude_pid_count < 64) {
                     exclude_pids[exclude_pid_count++] = (pid_t)atoi(optarg);
@@ -2152,7 +2161,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (tracker_init(&tracker, pid, interval_ms, no_clear, dual_channel, sd_clear,
-                     track_children, sd_only, uffd_sync, no_output) < 0) {
+                     track_children, sd_only, uffd_sync, no_output, verbose) < 0) {
         return 1;
     }
 
@@ -2240,7 +2249,7 @@ int main(int argc, char *argv[]) {
         sample_count++;
 
         /* Progress report (before flush frees the data) */
-        if (sample_count % 10 == 0) {
+        if (tracker.verbose && sample_count % 10 == 0) {
             sample_t *cur = &tracker.current_sample;
             if (tracker.dual_channel) {
                 fprintf(stderr, "Sample %d: wp=%d sd=%d dirty pages, %d processes\n",

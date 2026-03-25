@@ -440,10 +440,11 @@ def main():
         return 1
 
     logger.info(f"Starting workload: {' '.join(cmd)}")
+    workload_log = open(os.path.join(working_dir, 'workload.log'), 'w')
     workload_proc = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=workload_log,
+        stderr=workload_log,
         start_new_session=True  # setsid: prevent process group kill from sudo tracker
     )
 
@@ -652,6 +653,12 @@ def main():
                 workload_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 workload_proc.kill()
+
+        # Close workload log file
+        try:
+            workload_log.close()
+        except Exception:
+            pass
 
         # Cleanup working directory
         if not args.working_dir:
