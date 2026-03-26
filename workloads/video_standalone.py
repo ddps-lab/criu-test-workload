@@ -336,10 +336,20 @@ def run_video_workload(
             # Check if ffmpeg is still running
             if ffmpeg_process.poll() is not None:
                 print(f"[Video] FFmpeg finished (exit code: {ffmpeg_process.returncode})")
-                # In file mode, this is expected when done
                 if mode == 'file':
                     stats = get_output_stats(output_path)
                     print(f"[Video] Output: {stats}")
+                    # Restart ffmpeg to keep generating dirty pages
+                    elapsed = time.time() - start_time
+                    remaining = duration - elapsed if duration > 0 else 600
+                    if remaining > 10:
+                        print(f"[Video] Restarting ffmpeg for remaining {remaining:.0f}s")
+                        next_dur = min(int(remaining), 600)
+                        ffmpeg_process, output_path = start_ffmpeg_transcode(
+                            resolution, fps, next_dur, output_dir)
+                        ffmpeg_pid = ffmpeg_process.pid
+                        print(f"[Video] FFmpeg restarted PID: {ffmpeg_pid}")
+                        continue
                 # Keep running to wait for checkpoint_flag removal
                 time.sleep(1)
                 continue

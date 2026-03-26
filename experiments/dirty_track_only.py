@@ -125,6 +125,8 @@ def build_workload_cmd(args, working_dir: str) -> list:
             cmd.extend(['--resolution', args.resolution])
         if args.fps:
             cmd.extend(['--fps', str(args.fps)])
+        if args.video_mode:
+            cmd.extend(["--mode", args.video_mode])
 
     elif args.workload == 'dataproc':
         if args.num_rows:
@@ -348,6 +350,9 @@ def parse_args():
                           help='Video resolution WxH (video workload)')
     wl_group.add_argument('--fps', type=int, default=None,
                           help='Frames per second (video workload)')
+    wl_group.add_argument("--video-mode", type=str, default=None,
+                          choices=["file", "live"],
+                          help="Video mode: file or live (video workload)")
 
     # DataProc
     wl_group.add_argument('--num-rows', type=int, default=None,
