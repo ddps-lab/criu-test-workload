@@ -1588,6 +1588,8 @@ static int collect_sample(tracker_t *t) {
 
         if (kill(pt->pid, 0) < 0 && errno == ESRCH) {
             fprintf(stderr, "Process %d exited, removing from tracking\n", pt->pid);
+            /* Detach ptrace so parent can reap zombie */
+            ptrace(PTRACE_DETACH, pt->pid, 0, 0);
             process_tracker_cleanup(pt);
             /* Shift array */
             for (int j = i; j < t->process_count - 1; j++) {

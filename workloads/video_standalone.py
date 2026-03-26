@@ -111,7 +111,7 @@ def start_ffmpeg_transcode(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        preexec_fn=os.setsid
+        # preexec_fn=os.setsid  # removed: tracker needs child visibility
     )
 
     return process, output_file
@@ -154,7 +154,7 @@ def start_ffmpeg_live_transcode(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        preexec_fn=os.setsid
+        # preexec_fn=os.setsid  # removed: tracker needs child visibility
     )
 
     return process, output_pattern
