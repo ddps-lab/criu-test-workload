@@ -651,13 +651,78 @@ static int write_to_target(pid_t pid, uint64_t addr, const void *data, size_t le
     return 0;
 }
 
+#define MAX_THREADS 512
+
+/**
+ * Get all thread IDs for a given process.
+ * Returns the number of threads found (up to max).
+ */
+static int get_all_threads(pid_t pid, pid_t *out, int max)
+{
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/task", pid);
+    DIR *dir = opendir(path);
+    if (!dir) return 0;
+    int count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && count < max) {
+        pid_t tid = (pid_t)atoi(entry->d_name);
+        if (tid > 0)
+            out[count++] = tid;
+    }
+    closedir(dir);
+    return count;
+}
+
+/**
+ * Freeze all threads of a process except skip_tid (the main thread being
+ * injected on). Each thread is PTRACE_SEIZE'd + INTERRUPT'd + waitpid'd.
+ * Failures on individual threads are silently skipped (thread may have exited).
+ * Returns number of threads frozen; out_tids[0..out_count-1] filled for thaw.
+ */
+static int freeze_other_threads(pid_t pid, pid_t skip_tid,
+                                pid_t *out_tids, int *out_count)
+{
+    pid_t threads[MAX_THREADS];
+    int n = get_all_threads(pid, threads, MAX_THREADS);
+    int frozen = 0;
+    for (int i = 0; i < n; i++) {
+        if (threads[i] == skip_tid) continue;
+        if (ptrace(PTRACE_SEIZE, threads[i], 0, 0) < 0) continue;
+        if (ptrace(PTRACE_INTERRUPT, threads[i], 0, 0) < 0) {
+            ptrace(PTRACE_DETACH, threads[i], 0, 0);
+            continue;
+        }
+        int status;
+        if (waitpid(threads[i], &status, __WALL) < 0) {
+            ptrace(PTRACE_DETACH, threads[i], 0, 0);
+            continue;
+        }
+        out_tids[frozen++] = threads[i];
+    }
+    *out_count = frozen;
+    return frozen;
+}
+
+/**
+ * Thaw (PTRACE_DETACH) all previously frozen threads.
+ */
+static void thaw_other_threads(pid_t *tids, int count)
+{
+    for (int i = 0; i < count; i++) {
+        ptrace(PTRACE_DETACH, tids[i], 0, 0);
+    }
+}
+
 /**
  * Setup userfaultfd write-protection on a process via ptrace injection.
  *
  * This enables PM_SCAN_WP_MATCHING to work by registering each writable VMA
  * with userfaultfd in UFFDIO_REGISTER_MODE_WP + UFFD_FEATURE_WP_ASYNC.
  *
- * The target process is briefly stopped during setup (~1ms for typical VMAs).
+ * All threads are frozen during setup to prevent interference with syscall
+ * injection (CRIU compel-style). The target process is briefly stopped
+ * during setup (~10ms for multi-threaded processes).
  * With WP_ASYNC, subsequent write faults are handled inline by the kernel
  * (no userspace handler needed), so the workload runs at near-native speed.
  *
@@ -687,6 +752,13 @@ static int setup_userfaultfd_wp_for_process(process_tracker_t *pt, bool uffd_syn
         ptrace(PTRACE_DETACH, pid, 0, 0);
         return -1;
     }
+
+    /* 1b. Freeze all sibling threads for safe syscall injection */
+    pid_t frozen_tids[MAX_THREADS];
+    int frozen_count = 0;
+    freeze_other_threads(pid, pid, frozen_tids, &frozen_count);
+    if (frozen_count > 0)
+        fprintf(stderr, "Froze %d sibling threads (pid=%d)\n", frozen_count, pid);
 
     /* 2. Save original state */
     struct user_regs_struct saved_regs;
@@ -891,6 +963,7 @@ restore:
 
 detach:
     ptrace(PTRACE_DETACH, pid, 0, 0);
+    thaw_other_threads(frozen_tids, frozen_count);
 
     clock_gettime(CLOCK_MONOTONIC, &inject_end);
     double inject_ms = (inject_end.tv_sec - inject_start.tv_sec) * 1000.0 +
@@ -948,11 +1021,19 @@ static int cleanup_userfaultfd_wp_for_process(process_tracker_t *pt)
         return -1;
     }
 
+    /* 1b. Freeze all sibling threads for safe syscall injection */
+    pid_t frozen_tids[MAX_THREADS];
+    int frozen_count = 0;
+    freeze_other_threads(pid, pid, frozen_tids, &frozen_count);
+    if (frozen_count > 0)
+        fprintf(stderr, "cleanup: froze %d sibling threads (pid=%d)\n", frozen_count, pid);
+
     /* 2. Save original state */
     struct user_regs_struct saved_regs;
     if (ptrace(PTRACE_GETREGS, pid, 0, &saved_regs) < 0) {
         fprintf(stderr, "cleanup: GETREGS failed: %s\n", strerror(errno));
         ptrace(PTRACE_DETACH, pid, 0, 0);
+        thaw_other_threads(frozen_tids, frozen_count);
         pt->target_uffd = -1;
         pt->wp_active = false;
         return -1;
@@ -962,6 +1043,7 @@ static int cleanup_userfaultfd_wp_for_process(process_tracker_t *pt)
     long saved_code = ptrace(PTRACE_PEEKTEXT, pid, saved_regs.rip, 0);
     if (errno) {
         ptrace(PTRACE_DETACH, pid, 0, 0);
+        thaw_other_threads(frozen_tids, frozen_count);
         pt->target_uffd = -1;
         pt->wp_active = false;
         return -1;
@@ -971,6 +1053,7 @@ static int cleanup_userfaultfd_wp_for_process(process_tracker_t *pt)
     long code_with_syscall = (saved_code & ~0xFFFFL) | 0x050FL;
     if (ptrace(PTRACE_POKETEXT, pid, saved_regs.rip, code_with_syscall) < 0) {
         ptrace(PTRACE_DETACH, pid, 0, 0);
+        thaw_other_threads(frozen_tids, frozen_count);
         pt->target_uffd = -1;
         pt->wp_active = false;
         return -1;
@@ -1038,6 +1121,7 @@ restore:
     ptrace(PTRACE_POKETEXT, pid, saved_regs.rip, saved_code);
     ptrace(PTRACE_SETREGS, pid, 0, &saved_regs);
     ptrace(PTRACE_DETACH, pid, 0, 0);
+    thaw_other_threads(frozen_tids, frozen_count);
 
     pt->target_uffd = -1;
     pt->wp_active = false;
