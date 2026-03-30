@@ -134,7 +134,7 @@ def start_ffmpeg_live_transcode(
     cmd = [
         'ffmpeg',
         '-y',
-        '-re',  # Read input at native frame rate (simulate real-time)
+        # '-re',  # Removed: causes low dirty rate after initial buffer fill
         '-f', 'lavfi',
         '-i', f'testsrc2=size={resolution}:rate={fps}',  # Infinite duration
         '-c:v', 'libx264',

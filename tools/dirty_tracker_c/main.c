@@ -164,18 +164,34 @@ typedef struct {
     bool use_pagemap_scan;
 } process_tracker_t;
 
+/* Per-VMA dirty page summary (lightweight, for timeline) */
+typedef struct {
+    uint64_t start;
+    uint64_t end;
+    int dirty_pages;
+    int total_pages;
+    char perms[8];
+    vma_type_t vma_type;
+} vma_dirty_summary_t;
+
 /* Sample */
 typedef struct {
     double timestamp_ms;
     dirty_page_t *pages;    /* Primary channel (WP or soft-dirty depending on mode) */
     int page_count;
+    int page_capacity;      /* Current allocation capacity for pages */
     dirty_page_t *sd_pages; /* Soft-dirty channel (dual-channel mode only) */
     int sd_page_count;
+    int sd_page_capacity;   /* Current allocation capacity for sd_pages */
     pid_t *pids_tracked;    /* Array of PIDs tracked in this sample */
     int pids_tracked_count;
     /* Memory usage (aggregate across all tracked processes) */
     long rss_bytes;             /* Resident Set Size from /proc/pid/statm */
     long writable_vma_bytes;    /* Sum of writable VMA sizes from /proc/pid/maps */
+    /* Per-VMA dirty summary (all writable VMAs, including dirty=0) */
+    vma_dirty_summary_t *vma_summaries;
+    int vma_summary_count;
+    int vma_summary_capacity;
 } sample_t;
 
 /* Unique address hash node */
@@ -190,6 +206,8 @@ typedef struct {
     double rate_pages_per_sec;
     int cumulative_pages;
     int processes_tracked;
+    vma_dirty_summary_t *vma_summaries;  /* owned copy (pointer transfer from sample) */
+    int vma_summary_count;
 } timeline_entry_t;
 
 /* Tracker state */
@@ -540,6 +558,7 @@ static void tracker_cleanup(tracker_t *t) {
     free(t->current_sample.pages);
     free(t->current_sample.sd_pages);
     free(t->current_sample.pids_tracked);
+    free(t->current_sample.vma_summaries);
 
     /* Free unique address hash table */
     for (int i = 0; i < UNIQUE_HASH_SIZE; i++) {
@@ -551,7 +570,10 @@ static void tracker_cleanup(tracker_t *t) {
         }
     }
 
-    /* Free timeline */
+    /* Free timeline (including per-entry VMA summaries) */
+    for (int i = 0; i < t->timeline_count; i++) {
+        free(t->timeline[i].vma_summaries);
+    }
     free(t->timeline);
 }
 
@@ -1359,6 +1381,40 @@ static void add_unique_addr(tracker_t *t, uint64_t addr) {
     t->unique_count++;
 }
 
+/* ===== Dynamic page buffer growth ===== */
+
+static int ensure_page_capacity(dirty_page_t **pages, int *capacity, int required) {
+    if (required <= *capacity) return 0;
+    int new_cap = *capacity;
+    while (new_cap < required) new_cap = new_cap ? new_cap * 2 : 4096;
+    dirty_page_t *new_buf = realloc(*pages, new_cap * sizeof(dirty_page_t));
+    if (!new_buf) return -1;
+    *pages = new_buf;
+    *capacity = new_cap;
+    return 0;
+}
+
+/* ===== VMA dirty summary helpers ===== */
+
+static void append_vma_summary(sample_t *sample, vma_info_t *vma, int dirty_pages) {
+    if (sample->vma_summary_count >= sample->vma_summary_capacity) {
+        int new_cap = sample->vma_summary_capacity ? sample->vma_summary_capacity * 2 : 128;
+        vma_dirty_summary_t *tmp = realloc(sample->vma_summaries,
+            new_cap * sizeof(vma_dirty_summary_t));
+        if (!tmp) return;  /* OOM: skip this VMA summary */
+        sample->vma_summaries = tmp;
+        sample->vma_summary_capacity = new_cap;
+    }
+    vma_dirty_summary_t *vs = &sample->vma_summaries[sample->vma_summary_count++];
+    vs->start = vma->start;
+    vs->end = vma->end;
+    vs->dirty_pages = dirty_pages;
+    vs->total_pages = (vma->end - vma->start) / PAGE_SIZE;
+    strncpy(vs->perms, vma->perms, sizeof(vs->perms) - 1);
+    vs->perms[sizeof(vs->perms) - 1] = '\0';
+    vs->vma_type = vma->type;
+}
+
 /* ===== Dirty page scanning ===== */
 
 static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sample_t *sample) {
@@ -1435,7 +1491,12 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
                     pt->wp_initialized = true;
                     pt->wp_active = true;
                     fprintf(stderr, "WP mode active (pid=%d): using PM_SCAN_WP_MATCHING\n", pt->pid);
-                    /* First interval: empty (baseline WP just established) */
+                    /* First interval: baseline (all dirty=0), but record VMA list */
+                    for (int v2 = 0; v2 < pt->vma_count; v2++) {
+                        vma_info_t *bvma = &pt->vmas[v2];
+                        if (!strchr(bvma->perms, 'w')) continue;
+                        append_vma_summary(sample, bvma, 0);
+                    }
                     return 0;
                 }
             } else {
@@ -1485,7 +1546,19 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
                 fprintf(stderr, "ERROR: PM_SCAN_WP_MATCHING failed (EPERM, pid=%d).\n", pt->pid);
                 return -1;
             }
+            /* VMA summary with dirty=0 for failed scans (VMA still exists) */
+            append_vma_summary(sample, vma, 0);
             continue;
+        }
+
+        /* Count dirty pages for this VMA from regions (independent of page expansion) */
+        {
+            int vma_dirty_count = 0;
+            for (long i = 0; i < ret; i++) {
+                if (!use_wp && !(t->regions[i].categories & PAGE_IS_SOFT_DIRTY)) continue;
+                vma_dirty_count += (t->regions[i].end - t->regions[i].start) / PAGE_SIZE;
+            }
+            append_vma_summary(sample, vma, vma_dirty_count);
         }
 
         /* Process returned regions - in WP mode all returned pages are dirty */
@@ -1498,17 +1571,10 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
                  addr += PAGE_SIZE) {
 
                 /* Grow buffer if needed */
-                if (sample->page_count >= 65536) break;  /* Safety limit per sample */
+                if (ensure_page_capacity(&sample->pages, &sample->page_capacity,
+                                         sample->page_count + 1) < 0) break;
 
-                int capacity = sample->page_count + 1;
-                if (capacity > 4096 && (capacity & (capacity - 1)) == 0) {
-                    /* Power of two — realloc */
-                }
-                /* Pages buffer is pre-allocated or grown in collect_sample */
-
-                dirty_page_t *page = &sample->pages[sample->page_count];
-                if (sample->page_count >= 65536) break;
-                sample->page_count++;
+                dirty_page_t *page = &sample->pages[sample->page_count++];
                 page->addr = addr;
                 page->vma_type = vma->type;
                 strncpy(page->perms, vma->perms, sizeof(page->perms) - 1);
@@ -1551,7 +1617,8 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
                      addr < t->sd_regions[i].end;
                      addr += PAGE_SIZE) {
 
-                    if (sample->sd_page_count >= 65536) break;
+                    if (ensure_page_capacity(&sample->sd_pages, &sample->sd_page_capacity,
+                                             sample->sd_page_count + 1) < 0) break;
 
                     dirty_page_t *page = &sample->sd_pages[sample->sd_page_count++];
                     page->addr = addr;
@@ -1590,9 +1657,17 @@ static int read_dirty_pages_soft_dirty(tracker_t *t, process_tracker_t *pt, samp
 
         size_t entries = n / sizeof(uint64_t);
 
+        /* Count dirty pages for VMA summary */
+        int vma_dirty_count = 0;
+        for (size_t i = 0; i < entries; i++) {
+            if (buf[i] & PM_SOFT_DIRTY) vma_dirty_count++;
+        }
+        append_vma_summary(sample, vma, vma_dirty_count);
+
         for (size_t i = 0; i < entries; i++) {
             if (buf[i] & PM_SOFT_DIRTY) {
-                if (sample->page_count >= 65536) break;
+                if (ensure_page_capacity(&sample->pages, &sample->page_capacity,
+                                         sample->page_count + 1) < 0) break;
 
                 dirty_page_t *page = &sample->pages[sample->page_count++];
                 page->addr = vma->start + i * PAGE_SIZE;
@@ -1695,12 +1770,14 @@ static int collect_sample(tracker_t *t) {
     sample->timestamp_ms = get_elapsed_ms(&t->start_time);
 
     /* Allocate pages buffer (shared across all processes for this sample) */
-    sample->pages = malloc(65536 * sizeof(dirty_page_t));
+    sample->page_capacity = 4096;  /* start small, grows dynamically */
+    sample->pages = malloc(sample->page_capacity * sizeof(dirty_page_t));
     if (!sample->pages) return -1;
     sample->page_count = 0;
 
     if (t->dual_channel) {
-        sample->sd_pages = malloc(65536 * sizeof(dirty_page_t));
+        sample->sd_page_capacity = 4096;
+        sample->sd_pages = malloc(sample->sd_page_capacity * sizeof(dirty_page_t));
         if (!sample->sd_pages) {
             free(sample->pages);
             sample->pages = NULL;
@@ -1786,24 +1863,31 @@ static int collect_sample(tracker_t *t) {
             pt->pause_sync_handler = true;
             usleep(1000);  /* 1ms: let in-flight ioctl complete */
 
-            /* 2. Snapshot dirty set */
+            /* 2. Snapshot dirty set + per-VMA dirty counts */
+            int vma_dirty_counts[MAX_VMAS];
+            memset(vma_dirty_counts, 0, pt->vma_count * sizeof(int));
+
             pthread_mutex_lock(&pt->sync_dirty.lock);
             for (size_t di = 0; di < pt->sync_dirty.count; di++) {
-                if (sample->page_count >= 65536) break;
+                if (ensure_page_capacity(&sample->pages, &sample->page_capacity,
+                                         sample->page_count + 1) < 0) break;
                 uint64_t addr = pt->sync_dirty.addrs[di];
 
                 /* Find matching VMA for classification */
                 vma_type_t vtype = VMA_UNKNOWN;
                 const char *vperms = "----";
                 const char *vpathname = "";
+                int vma_idx = -1;
                 for (int v = 0; v < pt->vma_count; v++) {
                     if (addr >= pt->vmas[v].start && addr < pt->vmas[v].end) {
                         vtype = pt->vmas[v].type;
                         vperms = pt->vmas[v].perms;
                         vpathname = pt->vmas[v].pathname;
+                        vma_idx = v;
                         break;
                     }
                 }
+                if (vma_idx >= 0) vma_dirty_counts[vma_idx]++;
 
                 dirty_page_t *page = &sample->pages[sample->page_count++];
                 page->addr = addr;
@@ -1817,6 +1901,12 @@ static int collect_sample(tracker_t *t) {
             }
             pt->sync_dirty.count = 0;
             pthread_mutex_unlock(&pt->sync_dirty.lock);
+
+            /* Append VMA summaries for all writable VMAs (dirty=0 included) */
+            for (int v = 0; v < pt->vma_count; v++) {
+                if (!strchr(pt->vmas[v].perms, 'w')) continue;
+                append_vma_summary(sample, &pt->vmas[v], vma_dirty_counts[v]);
+            }
 
             /* 3. Re-protect all writable VMAs (handler paused, no race) */
             for (int v = 0; v < pt->vma_count; v++) {
@@ -1992,18 +2082,20 @@ static void flush_and_free_sample(tracker_t *t, sample_t *sample) {
         if (rate > t->peak_rate) t->peak_rate = rate;
     }
 
-    /* 3. Accumulate timeline entry */
+    /* 3. Accumulate timeline entry (with VMA summary pointer transfer) */
     if (t->timeline_count >= t->timeline_capacity) {
         t->timeline_capacity *= 2;
         t->timeline = realloc(t->timeline, t->timeline_capacity * sizeof(timeline_entry_t));
     }
     if (t->timeline) {
-        t->timeline[t->timeline_count++] = (timeline_entry_t){
-            .timestamp_ms = sample->timestamp_ms,
-            .rate_pages_per_sec = rate,
-            .cumulative_pages = t->cumulative_dirty,
-            .processes_tracked = sample->pids_tracked_count
-        };
+        timeline_entry_t *entry = &t->timeline[t->timeline_count++];
+        entry->timestamp_ms = sample->timestamp_ms;
+        entry->rate_pages_per_sec = rate;
+        entry->cumulative_pages = t->cumulative_dirty;
+        entry->processes_tracked = sample->pids_tracked_count;
+        entry->vma_summaries = sample->vma_summaries;       /* transfer ownership */
+        entry->vma_summary_count = sample->vma_summary_count;
+        sample->vma_summaries = NULL;  /* prevent double-free */
     }
 
     /* 4. Write to output (unless --no-output) */
@@ -2014,9 +2106,10 @@ static void flush_and_free_sample(tracker_t *t, sample_t *sample) {
     }
 
     /* 5. Free sample memory */
-    free(sample->pages);      sample->pages = NULL;
-    free(sample->sd_pages);   sample->sd_pages = NULL;
+    free(sample->pages);        sample->pages = NULL;
+    free(sample->sd_pages);     sample->sd_pages = NULL;
     free(sample->pids_tracked); sample->pids_tracked = NULL;
+    free(sample->vma_summaries); sample->vma_summaries = NULL;
 
     t->prev_timestamp_ms = sample->timestamp_ms;
 }
@@ -2101,12 +2194,23 @@ static void write_json_footer(tracker_t *t) {
     /* Dirty rate timeline (from accumulated lightweight entries) */
     fprintf(f, "  \"dirty_rate_timeline\": [\n");
     for (int i = 0; i < t->timeline_count; i++) {
-        fprintf(f, "    {\"timestamp_ms\": %.3f, \"rate_pages_per_sec\": %.2f, \"cumulative_pages\": %d, \"processes_tracked\": %d}%s\n",
-                t->timeline[i].timestamp_ms,
-                t->timeline[i].rate_pages_per_sec,
-                t->timeline[i].cumulative_pages,
-                t->timeline[i].processes_tracked,
-                i < t->timeline_count - 1 ? "," : "");
+        timeline_entry_t *e = &t->timeline[i];
+        fprintf(f, "    {\"timestamp_ms\": %.3f, \"rate_pages_per_sec\": %.2f, "
+                    "\"cumulative_pages\": %d, \"processes_tracked\": %d, "
+                    "\"vma_dirty\": [",
+                e->timestamp_ms, e->rate_pages_per_sec,
+                e->cumulative_pages, e->processes_tracked);
+        for (int v = 0; v < e->vma_summary_count; v++) {
+            vma_dirty_summary_t *vs = &e->vma_summaries[v];
+            fprintf(f, "{\"start\": \"0x%lx\", \"end\": \"0x%lx\", "
+                       "\"dirty\": %d, \"total\": %d, "
+                       "\"perms\": \"%s\", \"type\": \"%s\"}",
+                    (unsigned long)vs->start, (unsigned long)vs->end,
+                    vs->dirty_pages, vs->total_pages,
+                    vs->perms, vma_type_str(vs->vma_type));
+            if (v < e->vma_summary_count - 1) fprintf(f, ", ");
+        }
+        fprintf(f, "]}%s\n", i < t->timeline_count - 1 ? "," : "");
     }
     fprintf(f, "  ]\n");
 
@@ -2298,8 +2402,10 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Cleared soft-dirty for baseline (--sd-clear)\n");
     }
 
-    /* Open output file for streaming */
-    if (!no_output) {
+    /* Open output file for streaming.
+     * With -Q (no_output): still open if -o specified (footer-only: empty samples + timeline).
+     * Without -Q: open -o file or stdout. */
+    if (output_file || !no_output) {
         tracker.output_fp = output_file ? fopen(output_file, "w") : stdout;
         if (!tracker.output_fp) {
             fprintf(stderr, "Failed to open output file: %s\n", strerror(errno));
@@ -2372,7 +2478,7 @@ int main(int argc, char *argv[]) {
             tracker.sample_count, tracker.known_pid_count);
 
     /* Write footer + close output */
-    if (!no_output && tracker.output_fp) {
+    if (tracker.output_fp) {
         write_json_footer(&tracker);
         if (output_file) {
             fclose(tracker.output_fp);
