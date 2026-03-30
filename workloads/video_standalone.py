@@ -109,8 +109,8 @@ def start_ffmpeg_transcode(
 
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         # preexec_fn=os.setsid  # removed: tracker needs child visibility
     )
 
@@ -152,8 +152,8 @@ def start_ffmpeg_live_transcode(
 
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         # preexec_fn=os.setsid  # removed: tracker needs child visibility
     )
 
@@ -239,7 +239,8 @@ def run_video_workload(
     duration: int = 300,
     mode: str = 'file',  # 'file' or 'live'
     max_segments: int = 30,
-    working_dir: str = '.'
+    working_dir: str = '.',
+    keep_running: bool = False,
 ):
     """
     Main video processing workload.
@@ -286,8 +287,7 @@ def run_video_workload(
 
     # Check if ffmpeg is still running
     if ffmpeg_process.poll() is not None:
-        stderr = ffmpeg_process.stderr.read().decode()
-        print(f"[Video] ERROR: ffmpeg exited unexpectedly: {stderr}")
+        print(f"[Video] ERROR: ffmpeg exited unexpectedly (exit code: {ffmpeg_process.returncode})")
         sys.exit(1)
 
     # Signal ready - with WRAPPER PID (this script)
@@ -308,7 +308,7 @@ def run_video_workload(
     try:
         while True:
             # Check if restore completed
-            if check_restore_complete(working_dir):
+            if not keep_running and check_restore_complete(working_dir):
                 print(f"[Video] Restore detected - checkpoint_flag removed")
 
                 # Give ffmpeg a moment after restore
@@ -350,6 +350,12 @@ def run_video_workload(
                         ffmpeg_pid = ffmpeg_process.pid
                         print(f"[Video] FFmpeg restarted PID: {ffmpeg_pid}")
                         continue
+                # keep_running: exit when ffmpeg done and duration reached
+                if keep_running and duration > 0:
+                    elapsed = time.time() - start_time
+                    if elapsed >= duration:
+                        print(f"[Video] Duration {duration}s reached, exiting")
+                        break
                 # Keep running to wait for checkpoint_flag removal
                 time.sleep(1)
                 continue
@@ -446,6 +452,11 @@ def main():
         default='.',
         help='Working directory'
     )
+    parser.add_argument(
+        '--keep-running',
+        action='store_true',
+        help='Keep running after restore (ignore checkpoint_flag removal)'
+    )
 
     args = parser.parse_args()
 
@@ -455,7 +466,8 @@ def main():
         duration=args.duration,
         mode=args.mode,
         max_segments=args.max_segments,
-        working_dir=args.working_dir
+        working_dir=args.working_dir,
+        keep_running=args.keep_running,
     )
 
 

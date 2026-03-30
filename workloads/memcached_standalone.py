@@ -220,6 +220,7 @@ def run_memcached_workload(
     target_throughput: int = 0,
     duration: int = 0,
     working_dir: str = '.',
+    keep_running: bool = False,
 ):
     """
     Main Memcached + YCSB workload.
@@ -320,7 +321,7 @@ def run_memcached_workload(
     try:
         while True:
             # Check restore
-            if check_restore_complete(working_dir):
+            if not keep_running and check_restore_complete(working_dir):
                 print(f"[Memcached] Restore detected - checkpoint_flag removed")
                 # Kill YCSB client if still running
                 if run_proc.poll() is None:
@@ -355,6 +356,9 @@ def run_memcached_workload(
                     if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
                         print(f"[Memcached] YCSB: {line.strip()}")
                 print(f"[Memcached] YCSB run finished (exit={run_proc.returncode})")
+                if keep_running:
+                    print(f"[Memcached] YCSB done, exiting")
+                    break
 
             # Progress report
             current_time = time.time()
@@ -451,6 +455,11 @@ def main():
         default='.',
         help='Working directory for signal files'
     )
+    parser.add_argument(
+        '--keep-running',
+        action='store_true',
+        help='Keep running after restore (ignore checkpoint_flag removal)'
+    )
 
     args = parser.parse_args()
 
@@ -465,6 +474,7 @@ def main():
         target_throughput=args.target_throughput,
         duration=args.duration,
         working_dir=args.working_dir,
+        keep_running=args.keep_running,
     )
 
 

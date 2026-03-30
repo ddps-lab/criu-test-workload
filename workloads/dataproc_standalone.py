@@ -344,7 +344,8 @@ def run_dataproc_workload(
     operations: int = 0,  # 0 = infinite (use duration)
     batch_size: int = 1000,
     duration: int = 0,  # 0 = infinite (use operations limit)
-    working_dir: str = '.'
+    working_dir: str = '.',
+    keep_running: bool = False,
 ):
     """
     Streaming data processing workload.
@@ -386,7 +387,7 @@ def run_dataproc_workload(
 
     while True:
         # Check if restore completed
-        if check_restore_complete(working_dir):
+        if not keep_running and check_restore_complete(working_dir):
             elapsed = time.time() - start_time
             print(f"[DataProc] Restore detected - checkpoint_flag removed")
             print(f"[DataProc] === STATE SUMMARY (lost on restart) ===")
@@ -415,6 +416,9 @@ def run_dataproc_workload(
         # Duration check
         elapsed = time.time() - start_time
         if duration > 0 and elapsed >= duration:
+            if keep_running:
+                print(f"[DataProc] Duration {duration}s reached, exiting")
+                sys.exit(0)
             time.sleep(1)
             continue
 
@@ -489,6 +493,11 @@ def main():
         default='.',
         help='Working directory for signal files (default: current directory)'
     )
+    parser.add_argument(
+        '--keep-running',
+        action='store_true',
+        help='Keep running after restore (ignore checkpoint_flag removal)'
+    )
 
     args = parser.parse_args()
 
@@ -498,7 +507,8 @@ def main():
         operations=args.operations,
         batch_size=args.batch_size,
         duration=args.duration,
-        working_dir=args.working_dir
+        working_dir=args.working_dir,
+        keep_running=args.keep_running,
     )
 
 

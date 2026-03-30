@@ -305,6 +305,7 @@ def monitor_ycsb_run(
     target_throughput: int,
     duration: int,
     working_dir: str,
+    keep_running: bool = False,
 ) -> dict:
     """Start YCSB run phase and monitor for restore.
 
@@ -319,7 +320,7 @@ def monitor_ycsb_run(
 
     while True:
         # Check restore
-        if check_restore_complete(working_dir):
+        if not keep_running and check_restore_complete(working_dir):
             print(f"[Redis] Restore detected during YCSB run phase")
             # Kill YCSB client if still running (it's not checkpointed)
             if run_proc.poll() is None:
@@ -344,6 +345,14 @@ def monitor_ycsb_run(
                 if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
                     print(f"[Redis] YCSB: {line.strip()}")
             print(f"[Redis] YCSB run phase finished (exit={run_proc.returncode})")
+            if keep_running:
+                elapsed = time.time() - start_time
+                return {
+                    'restored': False,
+                    'mode': 'ycsb',
+                    'elapsed': elapsed,
+                    'ycsb_finished': True,
+                }
             # Keep waiting for checkpoint_flag removal
 
         current_time = time.time()
@@ -356,7 +365,7 @@ def monitor_ycsb_run(
         time.sleep(1)
 
 
-def run_continuous_operations(client, num_keys, value_size, duration, working_dir):
+def run_continuous_operations(client, num_keys, value_size, duration, working_dir, keep_running=False):
     """
     Run continuous mixed read/write operations on Redis.
 
@@ -383,7 +392,7 @@ def run_continuous_operations(client, num_keys, value_size, duration, working_di
     last_report_time = start_time
 
     while True:
-        if check_restore_complete(working_dir):
+        if not keep_running and check_restore_complete(working_dir):
             return {
                 'restored': True,
                 'ops_count': ops_count,
@@ -397,6 +406,18 @@ def run_continuous_operations(client, num_keys, value_size, duration, working_di
 
         elapsed = time.time() - start_time
         if duration > 0 and elapsed >= duration:
+            if keep_running:
+                print(f"[Redis] Duration {duration}s reached, exiting")
+                return {
+                    'restored': False,
+                    'ops_count': ops_count,
+                    'extra_keys_written': extra_keys_written,
+                    'extra_keys_live': min(extra_keys_written, max_extra_keys),
+                    'tx_log_entries': tx_log_entries,
+                    'sorted_set_members': sorted_set_members,
+                    'updates_to_existing': updates_to_existing,
+                    'elapsed': elapsed,
+                }
             if check_restore_complete(working_dir):
                 return {
                     'restored': True,
@@ -482,6 +503,7 @@ def run_redis_workload(
     record_count: int = 100000,
     ycsb_threads: int = 1,
     target_throughput: int = 0,
+    keep_running: bool = False,
 ):
     """
     Main Redis workload.
@@ -574,6 +596,7 @@ def run_redis_workload(
             result = monitor_ycsb_run(
                 ycsb_home, props_path, ycsb_threads,
                 target_throughput, duration, working_dir,
+                keep_running=keep_running,
             )
 
             if result.get('restored'):
@@ -666,7 +689,7 @@ def run_redis_workload(
 
         print(f"[Redis] Starting continuous operations (duration={duration_str})...")
         try:
-            result = run_continuous_operations(client, num_keys, value_size, duration, working_dir)
+            result = run_continuous_operations(client, num_keys, value_size, duration, working_dir, keep_running=keep_running)
 
             if result['restored']:
                 print(f"[Redis] Restore detected - checkpoint_flag removed")
@@ -785,6 +808,11 @@ def main():
         default=0,
         help='YCSB target throughput in ops/sec (0 = unlimited, default: 0)'
     )
+    parser.add_argument(
+        '--keep-running',
+        action='store_true',
+        help='Keep running after restore (ignore checkpoint_flag removal)'
+    )
 
     args = parser.parse_args()
 
@@ -799,6 +827,7 @@ def main():
         record_count=args.record_count,
         ycsb_threads=args.ycsb_threads,
         target_throughput=args.target_throughput,
+        keep_running=args.keep_running,
     )
 
 

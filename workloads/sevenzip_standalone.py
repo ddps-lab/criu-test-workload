@@ -145,6 +145,7 @@ def run_sevenzip_workload(
     seed: int = 42,
     duration: int = 0,
     working_dir: str = '.',
+    keep_running: bool = False,
 ):
     """
     Main 7zip compression workload.
@@ -211,7 +212,7 @@ def run_sevenzip_workload(
     try:
         while True:
             # Check restore
-            if check_restore_complete(working_dir):
+            if not keep_running and check_restore_complete(working_dir):
                 elapsed = time.time() - start_time
                 print(f"[7zip] Restore detected - checkpoint_flag removed")
 
@@ -253,6 +254,10 @@ def run_sevenzip_workload(
                     z_pid = z_process.pid
                     print(f"[7zip] Starting cycle {compression_cycles + 1} (7z PID: {z_pid})")
                 else:
+                    if keep_running:
+                        elapsed = time.time() - start_time
+                        print(f"[7zip] Compression done, exiting (cycles={compression_cycles}, elapsed={elapsed:.1f}s)")
+                        break
                     # Duration reached or single cycle mode, wait for checkpoint
                     print(f"[7zip] Waiting for checkpoint_flag removal...")
                     while not check_restore_complete(working_dir):
@@ -336,6 +341,11 @@ def main():
         default='.',
         help='Working directory for signal files'
     )
+    parser.add_argument(
+        '--keep-running',
+        action='store_true',
+        help='Keep running after restore (ignore checkpoint_flag removal)'
+    )
 
     args = parser.parse_args()
 
@@ -346,6 +356,7 @@ def main():
         seed=args.seed,
         duration=args.duration,
         working_dir=args.working_dir,
+        keep_running=args.keep_running,
     )
 
 

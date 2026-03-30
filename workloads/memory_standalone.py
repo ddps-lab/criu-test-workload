@@ -63,7 +63,8 @@ def run_memory_workload(
     max_memory_mb: int = 8192,
     duration: int = 0,
     check_lazy_loading: bool = False,
-    working_dir: str = '.'
+    working_dir: str = '.',
+    keep_running: bool = False,
 ):
     """
     Main memory allocation workload.
@@ -93,7 +94,7 @@ def run_memory_workload(
 
     while True:
         # Check if restore completed (checkpoint_flag removed)
-        if check_restore_complete(working_dir):
+        if not keep_running and check_restore_complete(working_dir):
             elapsed = time.time() - start_time
             print("[Memory] Restore detected - checkpoint_flag removed")
             print(f"[Memory] === STATE SUMMARY (lost on restart) ===")
@@ -113,6 +114,9 @@ def run_memory_workload(
         if duration > 0:
             elapsed = time.time() - start_time
             if elapsed >= duration:
+                if keep_running:
+                    print(f"[Memory] Duration {duration}s reached, exiting")
+                    sys.exit(0)
                 time.sleep(1)
                 continue
 
@@ -171,6 +175,11 @@ def main():
         default='.',
         help='Working directory for signal files (default: current directory)'
     )
+    parser.add_argument(
+        '--keep-running',
+        action='store_true',
+        help='Keep running after restore (ignore checkpoint_flag removal)'
+    )
 
     args = parser.parse_args()
 
@@ -180,7 +189,8 @@ def main():
         max_memory_mb=args.max_memory_mb,
         duration=args.duration,
         check_lazy_loading=args.check_lazy_loading,
-        working_dir=args.working_dir
+        working_dir=args.working_dir,
+        keep_running=args.keep_running,
     )
 
 

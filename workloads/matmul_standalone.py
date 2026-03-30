@@ -51,7 +51,8 @@ def run_matmul_workload(
     iterations: int = 0,  # 0 = infinite
     interval: float = 0.1,
     duration: int = 0,  # 0 = infinite (use iterations limit)
-    working_dir: str = '.'
+    working_dir: str = '.',
+    keep_running: bool = False,
 ):
     """
     Power Iteration eigenvalue solver workload.
@@ -105,7 +106,7 @@ def run_matmul_workload(
 
     while True:
         # Check if restore completed
-        if check_restore_complete(working_dir):
+        if not keep_running and check_restore_complete(working_dir):
             elapsed = time.time() - start_time
             print(f"[MatMul] Restore detected - checkpoint_flag removed")
             print(f"[MatMul] === STATE SUMMARY (lost on restart) ===")
@@ -125,6 +126,11 @@ def run_matmul_workload(
         # Duration check
         elapsed = time.time() - start_time
         if duration > 0 and elapsed >= duration:
+            if keep_running:
+                iter_per_sec = iteration / elapsed if elapsed > 0 else 0
+                print(f"[MatMul] Duration {duration}s reached, exiting")
+                print(f"[METRIC] throughput {iter_per_sec:.4f} iter/s")
+                sys.exit(0)
             if not metric_printed:
                 iter_per_sec = iteration / elapsed if elapsed > 0 else 0
                 print(f"[METRIC] throughput {iter_per_sec:.4f} iter/s")
@@ -197,6 +203,11 @@ def main():
         default='.',
         help='Working directory for signal files (default: current directory)'
     )
+    parser.add_argument(
+        '--keep-running',
+        action='store_true',
+        help='Keep running after restore (ignore checkpoint_flag removal)'
+    )
 
     args = parser.parse_args()
 
@@ -205,7 +216,8 @@ def main():
         iterations=args.iterations,
         interval=args.interval,
         duration=args.duration,
-        working_dir=args.working_dir
+        working_dir=args.working_dir,
+        keep_running=args.keep_running,
     )
 
 

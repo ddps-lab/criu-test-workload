@@ -34,11 +34,14 @@ def main():
     parser.add_argument("--buffer-mb", type=int, default=256, help="Buffer size in MB")
     parser.add_argument("--duration", type=int, default=60, help="Duration in seconds")
     parser.add_argument("--working_dir", type=str, default=".", help="Working directory")
+    parser.add_argument("--keep-running", action="store_true",
+                        help="Keep running after restore (ignore checkpoint_flag removal)")
     args = parser.parse_args()
 
     buffer_mb = args.buffer_mb
     duration = args.duration
     working_dir = args.working_dir
+    keep_running = args.keep_running
     os.makedirs(working_dir, exist_ok=True)
 
     num_pages = buffer_mb * 256  # 256 pages per MB
@@ -64,7 +67,7 @@ def main():
     metric_printed = False
 
     while True:
-        if check_restore_complete(working_dir):
+        if not keep_running and check_restore_complete(working_dir):
             elapsed = time.time() - start_time
             if iteration > 0 and not metric_printed:
                 iter_per_sec = iteration / elapsed if elapsed > 0 else 0
@@ -76,6 +79,11 @@ def main():
 
         elapsed = time.time() - start_time
         if duration > 0 and elapsed >= duration:
+            if keep_running:
+                iter_per_sec = iteration / elapsed if elapsed > 0 else 0
+                print(f"[MemWrite] Duration {duration}s reached, exiting")
+                print(f"[METRIC] throughput {iter_per_sec:.4f} iter/s")
+                sys.exit(0)
             if not metric_printed:
                 iter_per_sec = iteration / elapsed if elapsed > 0 else 0
                 print(f"[METRIC] throughput {iter_per_sec:.4f} iter/s")

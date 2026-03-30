@@ -143,6 +143,7 @@ def run_xgboost_workload(
     num_threads: int = 1,
     duration: int = 0,
     working_dir: str = '.',
+    keep_running: bool = False,
 ):
     """
     XGBoost training workload.
@@ -238,7 +239,7 @@ def run_xgboost_workload(
 
     while round_num < max_rounds:
         # Check restore
-        if check_restore_complete(working_dir):
+        if not keep_running and check_restore_complete(working_dir):
             elapsed = time.time() - start_time
             print(f"[XGBoost] Restore detected - checkpoint_flag removed")
             print(f"[XGBoost] === STATE SUMMARY (lost on restart) ===")
@@ -256,6 +257,11 @@ def run_xgboost_workload(
         # Duration check
         elapsed = time.time() - start_time
         if duration > 0 and elapsed >= duration:
+            if keep_running:
+                rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
+                print(f"[XGBoost] Duration {duration}s reached, exiting")
+                print(f"[METRIC] throughput {rounds_per_sec:.4f} rounds/s")
+                sys.exit(0)
             if not metric_printed:
                 rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
                 print(f"[METRIC] throughput {rounds_per_sec:.4f} rounds/s")
@@ -295,7 +301,13 @@ def run_xgboost_workload(
                   f"elapsed={total_elapsed:.0f}s{remaining}")
             last_report_time = current_time
 
-    # If we reach max_rounds, wait for checkpoint
+    # If we reach max_rounds, exit or wait for checkpoint
+    if keep_running:
+        elapsed = time.time() - start_time
+        rounds_per_sec = round_num / elapsed if elapsed > 0 else 0
+        print(f"[XGBoost] Reached {max_rounds} rounds, exiting")
+        print(f"[METRIC] throughput {rounds_per_sec:.4f} rounds/s")
+        sys.exit(0)
     print(f"[XGBoost] Reached {max_rounds} rounds, waiting for checkpoint...")
     while True:
         if check_restore_complete(working_dir):
@@ -390,6 +402,11 @@ def main():
         default='.',
         help='Working directory for signal files'
     )
+    parser.add_argument(
+        '--keep-running',
+        action='store_true',
+        help='Keep running after restore (ignore checkpoint_flag removal)'
+    )
 
     args = parser.parse_args()
 
@@ -406,6 +423,7 @@ def main():
         num_threads=args.num_threads,
         duration=args.duration,
         working_dir=args.working_dir,
+        keep_running=args.keep_running,
     )
 
 
