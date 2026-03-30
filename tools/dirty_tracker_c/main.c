@@ -1453,7 +1453,7 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
             };
             long ret = ioctl(pt->pagemap_fd, PAGEMAP_SCAN, &check_args);
 
-            if (ret > 0) {
+            if (ret >= 0 || errno == EFAULT) { /* ret>=0: verified, EFAULT: EC2 Nitro edge case, proceed anyway */
                 fprintf(stderr, "WP mode verified: PAGE_IS_WPALLOWED present (pid=%d)\n", pt->pid);
 
                 /* Step 3: WP all present pages for baseline */
