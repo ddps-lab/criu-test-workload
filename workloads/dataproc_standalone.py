@@ -384,6 +384,7 @@ def run_dataproc_workload(
 
     start_time = time.time()
     last_report_time = start_time
+    metric_printed = False
 
     while True:
         # Check if restore completed
@@ -410,6 +411,8 @@ def run_dataproc_workload(
             print(f"[DataProc]   Aggregator memory: {aggregator.memory_usage_mb():.2f} MB")
             print(f"[DataProc]   Elapsed time: {elapsed:.1f}s")
             print(f"[DataProc]   ALL accumulated statistics LOST on restart")
+            batches_per_sec = aggregator.batches_processed / elapsed if elapsed > 0 else 0
+            print(f"[METRIC] throughput {batches_per_sec:.4f} batch/s")
             print(f"[DataProc] ==========================================")
             sys.exit(0)
 
@@ -417,8 +420,15 @@ def run_dataproc_workload(
         elapsed = time.time() - start_time
         if duration > 0 and elapsed >= duration:
             if keep_running:
+                elapsed = time.time() - start_time
+                batches_per_sec = aggregator.batches_processed / elapsed if elapsed > 0 else 0
+                print(f"[METRIC] throughput {batches_per_sec:.4f} batch/s")
                 print(f"[DataProc] Duration {duration}s reached, exiting")
                 sys.exit(0)
+            if not metric_printed:
+                batches_per_sec = aggregator.batches_processed / elapsed if elapsed > 0 else 0
+                print(f"[METRIC] throughput {batches_per_sec:.4f} batch/s")
+                metric_printed = True
             time.sleep(1)
             continue
 
