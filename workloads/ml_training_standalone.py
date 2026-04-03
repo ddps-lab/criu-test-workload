@@ -201,8 +201,8 @@ def run_ml_training_workload(
             print(f"[MLTrain]   Model parameters: {num_params:,} (ALL learned weights lost on restart)")
             print(f"[MLTrain]   Optimizer states: Adam momentum/variance for each param (ALL lost)")
             print(f"[MLTrain]   Loss history: {len(loss_history)} epochs of convergence data (ALL lost)")
-            epochs_per_sec = epoch / training_duration if training_duration > 0 else 0
-            print(f"[METRIC] throughput {epochs_per_sec:.4f} epoch/s")
+            steps_per_sec = total_batches / training_duration if training_duration > 0 else 0
+            print(f"[METRIC] throughput {steps_per_sec:.4f} step/s")
             print(f"[MLTrain] ==========================================")
             sys.exit(0)
 
@@ -210,13 +210,13 @@ def run_ml_training_workload(
         elapsed = time.time() - training_start_time
         if duration > 0 and elapsed >= duration:
             if keep_running:
-                epochs_per_sec = epoch / elapsed if elapsed > 0 else 0
-                print(f"[METRIC] throughput {epochs_per_sec:.4f} epoch/s")
+                steps_per_sec = total_batches / elapsed if elapsed > 0 else 0
+                print(f"[METRIC] throughput {steps_per_sec:.4f} step/s")
                 print(f"[MLTrain] Duration {duration}s reached, exiting")
                 sys.exit(0)
             if not metric_printed:
-                epochs_per_sec = epoch / elapsed if elapsed > 0 else 0
-                print(f"[METRIC] throughput {epochs_per_sec:.4f} epoch/s")
+                steps_per_sec = total_batches / elapsed if elapsed > 0 else 0
+                print(f"[METRIC] throughput {steps_per_sec:.4f} step/s")
                 metric_printed = True
             time.sleep(1)
             continue
