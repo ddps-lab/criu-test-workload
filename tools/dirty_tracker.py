@@ -82,6 +82,8 @@ class DirtyPage:
     vma_type: str
     vma_perms: str
     pathname: str
+    vma_start: int = 0
+    vma_end: int = 0
     size: int = 4096
 
 
@@ -225,7 +227,9 @@ class SingleProcessTracker:
                             addr=addr,
                             vma_type=vma.vma_type.value,
                             vma_perms=vma.perms,
-                            pathname=vma.pathname
+                            pathname=vma.pathname,
+                            vma_start=vma.start,
+                            vma_end=vma.end,
                         ))
                         unique_addrs.add(addr)
 
@@ -474,6 +478,8 @@ class DirtyPageTracker:
                         'vma_type': p.vma_type,
                         'vma_perms': p.vma_perms,
                         'pathname': p.pathname,
+                        'vma_start': hex(p.vma_start),
+                        'vma_end': hex(p.vma_end),
                         'size': p.size
                     }
                     for p in sample.dirty_pages

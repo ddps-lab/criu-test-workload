@@ -116,6 +116,8 @@ typedef struct {
 /* Dirty page info */
 typedef struct {
     uint64_t addr;
+    uint64_t vma_start;
+    uint64_t vma_end;
     vma_type_t vma_type;
     char perms[8];
     char pathname[256];
@@ -1576,6 +1578,8 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
 
                 dirty_page_t *page = &sample->pages[sample->page_count++];
                 page->addr = addr;
+                page->vma_start = vma->start;
+                page->vma_end = vma->end;
                 page->vma_type = vma->type;
                 strncpy(page->perms, vma->perms, sizeof(page->perms) - 1);
                 strncpy(page->pathname, vma->pathname, sizeof(page->pathname) - 1);
@@ -1622,6 +1626,8 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
 
                     dirty_page_t *page = &sample->sd_pages[sample->sd_page_count++];
                     page->addr = addr;
+                    page->vma_start = vma->start;
+                    page->vma_end = vma->end;
                     page->vma_type = vma->type;
                     strncpy(page->perms, vma->perms, sizeof(page->perms) - 1);
                     strncpy(page->pathname, vma->pathname, sizeof(page->pathname) - 1);
@@ -1671,6 +1677,8 @@ static int read_dirty_pages_soft_dirty(tracker_t *t, process_tracker_t *pt, samp
 
                 dirty_page_t *page = &sample->pages[sample->page_count++];
                 page->addr = vma->start + i * PAGE_SIZE;
+                page->vma_start = vma->start;
+                page->vma_end = vma->end;
                 page->vma_type = vma->type;
                 strncpy(page->perms, vma->perms, sizeof(page->perms) - 1);
                 strncpy(page->pathname, vma->pathname, sizeof(page->pathname) - 1);
@@ -1891,6 +1899,8 @@ static int collect_sample(tracker_t *t) {
 
                 dirty_page_t *page = &sample->pages[sample->page_count++];
                 page->addr = addr;
+                page->vma_start = (vma_idx >= 0) ? pt->vmas[vma_idx].start : 0;
+                page->vma_end = (vma_idx >= 0) ? pt->vmas[vma_idx].end : 0;
                 page->vma_type = vtype;
                 strncpy(page->perms, vperms, sizeof(page->perms) - 1);
                 strncpy(page->pathname, vpathname, sizeof(page->pathname) - 1);
@@ -2020,8 +2030,8 @@ static void write_sample_json(FILE *f, tracker_t *t, sample_t *sample) {
         fprintf(f, "        \"dirty_pages\": [\n");
         for (int p = 0; p < sample->page_count; p++) {
             dirty_page_t *page = &sample->pages[p];
-            fprintf(f, "          {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
-                    page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
+            fprintf(f, "          {\"addr\": \"0x%lx\", \"vma_start\": \"0x%lx\", \"vma_end\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
+                    page->addr, page->vma_start, page->vma_end, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
                     p < sample->page_count - 1 ? "," : "");
         }
         fprintf(f, "        ],\n");
@@ -2033,8 +2043,8 @@ static void write_sample_json(FILE *f, tracker_t *t, sample_t *sample) {
         fprintf(f, "        \"dirty_pages\": [\n");
         for (int p = 0; p < sample->sd_page_count; p++) {
             dirty_page_t *page = &sample->sd_pages[p];
-            fprintf(f, "          {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
-                    page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
+            fprintf(f, "          {\"addr\": \"0x%lx\", \"vma_start\": \"0x%lx\", \"vma_end\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
+                    page->addr, page->vma_start, page->vma_end, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
                     p < sample->sd_page_count - 1 ? "," : "");
         }
         fprintf(f, "        ],\n");
@@ -2046,8 +2056,8 @@ static void write_sample_json(FILE *f, tracker_t *t, sample_t *sample) {
         fprintf(f, "      \"dirty_pages\": [\n");
         for (int p = 0; p < sample->page_count; p++) {
             dirty_page_t *page = &sample->pages[p];
-            fprintf(f, "        {\"addr\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
-                    page->addr, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
+            fprintf(f, "        {\"addr\": \"0x%lx\", \"vma_start\": \"0x%lx\", \"vma_end\": \"0x%lx\", \"vma_type\": \"%s\", \"vma_perms\": \"%s\", \"pathname\": \"%s\", \"size\": %lu}%s\n",
+                    page->addr, page->vma_start, page->vma_end, vma_type_str(page->vma_type), page->perms, page->pathname, (unsigned long)PAGE_SIZE,
                     p < sample->page_count - 1 ? "," : "");
         }
         fprintf(f, "      ],\n");
