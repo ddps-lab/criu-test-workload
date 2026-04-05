@@ -65,7 +65,7 @@ def start_memcached_server(port: int, memory_mb: int, threads: int = 1) -> subpr
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        preexec_fn=os.setsid,
+        preexec_fn=None if os.environ.get("CRIU_NO_SETSID") else os.setsid,
     )
     return process
 

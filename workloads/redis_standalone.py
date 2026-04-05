@@ -115,7 +115,7 @@ def start_redis_server(port: int, working_dir: str) -> subprocess.Popen:
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        preexec_fn=os.setsid  # Create new session for proper signal handling
+        preexec_fn=None if os.environ.get("CRIU_NO_SETSID") else os.setsid
     )
 
     return process
