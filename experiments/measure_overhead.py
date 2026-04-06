@@ -342,7 +342,7 @@ def run_single_experiment(args, experiment_name, experiment_config,
     try:
         # Wait for workload to be ready
         try:
-            workload_pid = wait_for_checkpoint_ready(run_dir, timeout=120)
+            workload_pid = wait_for_checkpoint_ready(run_dir, timeout=900)
         except TimeoutError as e:
             logger.error(f"  Workload failed to start: {e}")
             return None

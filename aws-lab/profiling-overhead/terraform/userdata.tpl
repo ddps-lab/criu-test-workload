@@ -42,5 +42,5 @@ echo "Experiment complete, uploading to S3..."
 $(which aws) s3 cp $OUTPUT_FILE s3://$S3_BUCKET/overhead/$EXPERIMENT_NAME.json --region $REGION
 $(which aws) s3 cp /var/log/experiment.log s3://$S3_BUCKET/logs/$EXPERIMENT_NAME.log --region $REGION
 
-echo "Upload complete, shutting down..."
-sudo shutdown -h now
+echo "Upload complete, keeping instance alive for debug..."
+while true; do sleep 3600; done
