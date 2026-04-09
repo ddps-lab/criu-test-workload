@@ -154,8 +154,13 @@ class S3Config:
         """
         args = ["--object-storage-upload"]
 
-        # Endpoint URL (use upload endpoint, not download)
-        upload_endpoint = f"https://s3.{self.upload_region}.amazonaws.com" if self.upload_region else self.download_endpoint
+        # Endpoint URL: for path-style (MinIO), use download_endpoint directly
+        if self.path_style and self.download_endpoint:
+            upload_endpoint = self.download_endpoint
+        elif self.upload_region:
+            upload_endpoint = f"https://s3.{self.upload_region}.amazonaws.com"
+        else:
+            upload_endpoint = self.download_endpoint
         args.extend(["--object-storage-endpoint-url", upload_endpoint])
 
         # Bucket
@@ -207,18 +212,21 @@ class S3Config:
             args.append("--object-storage-object-prefix")
             args.append(f"{self.upload_prefix}/")
 
-        # Express One Zone specific options
+        # Authentication
+        if self.access_key:
+            args.extend(["--aws-access-key", self.access_key])
+        if self.secret_key:
+            args.extend(["--aws-secret-key", self.secret_key])
+        if self.upload_region:
+            args.extend(["--aws-region", self.upload_region])
+
+        # Express One Zone specific
         if self.s3_type == S3Type.EXPRESS_ONE_ZONE:
             args.append("--express-one-zone")
-            if self.access_key:
-                args.append("--aws-access-key")
-                args.append(self.access_key)
-            if self.secret_key:
-                args.append("--aws-secret-key")
-                args.append(self.secret_key)
-            if self.upload_region:
-                args.append("--aws-region")
-                args.append(self.upload_region)
+
+        # Path style (for MinIO)
+        if self.path_style:
+            args.append("--object-storage-path-style")
 
         return args
 
@@ -265,6 +273,7 @@ class S3Config:
             download_bucket=config.get('download_bucket', ''),
             access_key=config.get('access_key', ''),
             secret_key=config.get('secret_key', ''),
+            path_style=config.get('path_style', False),
         )
 
     def to_dict(self) -> dict:

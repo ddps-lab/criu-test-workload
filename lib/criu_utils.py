@@ -575,8 +575,10 @@ class CRIUExperiment:
 
         # Pass S3 config for direct upload if enabled
         s3_cfg = None
-        if strategy.get('s3_direct_upload', False) and hasattr(self, 's3_config'):
-            s3_cfg = self.s3_config
+        if strategy.get('s3_direct_upload', False):
+            s3_dict = self.config.get('s3', {})
+            if s3_dict.get('upload_bucket'):
+                s3_cfg = S3Config.from_dict(s3_dict)
 
         result = self.checkpoint_mgr.final_dump(
             self.source_host,
@@ -631,6 +633,35 @@ class CRIUExperiment:
 
     def _transfer_checkpoint(self):
         """Transfer checkpoint data to destination."""
+        strategy = self.checkpoint_config.get('strategy', {})
+
+        # S3 direct upload: CRIU already uploaded to S3 during dump.
+        # Only need to transfer metadata (non-pages files) to dest for restore setup.
+        if strategy.get('s3_direct_upload', False):
+            logger.info("S3 direct upload mode: checkpoint already on S3, skipping bulk transfer")
+            # Download metadata to dest (pages fetched on-demand via lazy-pages)
+            self.metrics.start_timer('transfer')
+            try:
+                dest_client = self.checkpoint_mgr.get_ssh_client(self.dest_host, self.ssh_user)
+                dest_client.execute(f"mkdir -p {self.final_checkpoint_dir}")
+                # Metadata is already on S3; dest will fetch via --enable-object-storage
+                result = {'success': True, 'method': 's3_direct'}
+            except Exception as e:
+                result = {'success': False, 'error': str(e)}
+            transfer_metric = self.metrics.stop_timer('transfer')
+            if not result.get('success', True):
+                raise RuntimeError(f"Transfer failed: {result.get('error')}")
+            self.metrics.record_transfer(
+                transfer_metric.duration, 's3_direct', result
+            )
+            logger.info(f"Transfer setup completed in {transfer_metric.duration:.2f}s")
+
+            # Transfer Java aux files if needed
+            workload_type = self.experiment_config.get('workload_type', '')
+            if workload_type in ('memcached', 'redis'):
+                self._transfer_java_aux_files()
+            return
+
         logger.info("Transferring checkpoint data...")
 
         self.metrics.start_timer('transfer')
