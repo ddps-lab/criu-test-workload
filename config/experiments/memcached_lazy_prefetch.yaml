@@ -1,0 +1,22 @@
+# Memcached + YCSB lazy-prefetch experiment
+experiment:
+  name: "memcached-lazy-prefetch"
+  workload_type: "memcached"
+  description: "Memcached with lazy restore and async prefetch from object storage"
+
+checkpoint:
+  strategy:
+    mode: "full"
+    wait_before_dump: 60  # Wait 60s for YCSB load + run phase
+
+workload:
+  memcached:
+    port: 11211
+    memory_mb: 1024
+  ycsb:
+    workload: "a"
+    home: "/opt/ycsb"
+    record_count: 100000
+    threads: 1
+    target_throughput: 0
+  duration: 300

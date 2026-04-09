@@ -654,6 +654,22 @@ class CRIUExperiment:
 
         logger.info(f"Transfer completed in {transfer_metric.duration:.2f}s")
 
+        # Transfer workload-specific auxiliary files (e.g., Java hsperfdata)
+        workload_type = self.experiment_config.get('workload_type', '')
+        if workload_type in ('memcached', 'redis'):
+            self._transfer_java_aux_files()
+
+    def _transfer_java_aux_files(self):
+        """Transfer Java auxiliary files needed for restore (hsperfdata, etc.)."""
+        try:
+            source_client = self.checkpoint_mgr.get_ssh_client(self.source_host, self.ssh_user)
+            rsync_cmd = (f"rsync -av /tmp/hsperfdata_* "
+                         f"{self.ssh_user}@{self.dest_host}:/tmp/ 2>/dev/null || true")
+            source_client.execute(rsync_cmd, timeout=10)
+            logger.info("Transferred Java auxiliary files (hsperfdata)")
+        except Exception as e:
+            logger.warning(f"Failed to transfer Java aux files: {e}")
+
     def _restore(self):
         """Restore process on destination node."""
         # Use lazy_config from dump phase (set in _run_final_dump)

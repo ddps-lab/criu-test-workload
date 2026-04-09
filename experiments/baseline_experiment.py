@@ -156,6 +156,22 @@ def parse_args():
         help='Redis value size in bytes (default: 1024)'
     )
 
+    # Memcached workload
+    parser.add_argument('--memcached-memory', type=int, default=None,
+                        help='Memcached memory in MB (default: 1024)')
+    parser.add_argument('--memcached-port', type=int, default=None,
+                        help='Memcached port (default: 11211)')
+    parser.add_argument('--ycsb-workload', type=str, default=None,
+                        help='YCSB workload type (default: a)')
+    parser.add_argument('--ycsb-home', type=str, default=None,
+                        help='YCSB installation path (default: /opt/ycsb)')
+    parser.add_argument('--record-count', type=int, default=None,
+                        help='YCSB record count (default: 100000)')
+    parser.add_argument('--ycsb-threads', type=int, default=None,
+                        help='YCSB client threads (default: 1)')
+    parser.add_argument('--target-throughput', type=int, default=None,
+                        help='YCSB target throughput ops/s (default: 0=unlimited)')
+
     # Video workload
     parser.add_argument(
         '--resolution',
@@ -511,6 +527,22 @@ def build_overrides(args) -> dict:
         overrides['workload.num_keys'] = args.num_keys
     if args.value_size:
         overrides['workload.value_size'] = args.value_size
+
+    # Memcached workload
+    if args.memcached_memory:
+        overrides['workload.memcached_memory'] = args.memcached_memory
+    if args.memcached_port:
+        overrides['workload.memcached_port'] = args.memcached_port
+    if args.ycsb_workload:
+        overrides['workload.ycsb_workload'] = args.ycsb_workload
+    if args.ycsb_home:
+        overrides['workload.ycsb_home'] = args.ycsb_home
+    if args.record_count:
+        overrides['workload.record_count'] = args.record_count
+    if args.ycsb_threads:
+        overrides['workload.ycsb_threads'] = args.ycsb_threads
+    if args.target_throughput is not None:
+        overrides['workload.target_throughput'] = args.target_throughput
 
     # Video workload
     if args.resolution:
