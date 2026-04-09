@@ -113,8 +113,8 @@ def start_redis_server(port: int, working_dir: str) -> subprocess.Popen:
 
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         preexec_fn=None if os.environ.get("CRIU_NO_SETSID") else os.setsid
     )
 
@@ -246,8 +246,8 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
 
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     return process
 
@@ -283,16 +283,18 @@ def run_ycsb_operations(
 
     if load_proc.returncode != 0:
         print(f"[Redis] ERROR: YCSB load failed (exit={load_proc.returncode})")
-        stderr_text = load_stderr.decode('utf-8', errors='replace')
-        for line in stderr_text.strip().split('\n')[-10:]:
-            print(f"[Redis]   {line}")
+        if load_stderr:
+            stderr_text = load_stderr.decode('utf-8', errors='replace')
+            for line in stderr_text.strip().split('\n')[-10:]:
+                print(f"[Redis]   {line}")
         sys.exit(1)
 
     # Parse load phase throughput
-    load_output = load_stdout.decode('utf-8', errors='replace')
-    for line in load_output.split('\n'):
-        if '[OVERALL], Throughput' in line:
-            print(f"[Redis] YCSB load: {line.strip()}")
+    if load_stdout:
+        load_output = load_stdout.decode('utf-8', errors='replace')
+        for line in load_output.split('\n'):
+            if '[OVERALL], Throughput' in line:
+                print(f"[Redis] YCSB load: {line.strip()}")
             break
 
     return props_path
@@ -340,7 +342,10 @@ def monitor_ycsb_run(
         # Check if YCSB run finished naturally
         if run_proc.poll() is not None and not ycsb_finished:
             ycsb_finished = True
-            stdout_data = run_proc.stdout.read().decode('utf-8', errors='replace')
+            if run_proc.stdout:
+                stdout_data = run_proc.stdout.read().decode('utf-8', errors='replace')
+            else:
+                stdout_data = ''
             for line in stdout_data.split('\n'):
                 if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
                     print(f"[Redis] YCSB: {line.strip()}")

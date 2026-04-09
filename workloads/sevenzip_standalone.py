@@ -131,8 +131,8 @@ def start_compression(input_file: str, output_file: str,
 
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         # preexec_fn=os.setsid,  # removed: tracker needs child visibility
     )
     return process
@@ -189,7 +189,7 @@ def run_sevenzip_workload(
     # Check if 7z failed immediately (non-zero exit = error)
     ret = z_process.poll()
     if ret is not None and ret != 0:
-        stderr = z_process.stderr.read().decode()
+        stderr = z_process.stderr.read().decode() if z_process.stderr else ''
         print(f"[7zip] ERROR: 7z failed (exit={ret}): {stderr}")
         sys.exit(1)
 

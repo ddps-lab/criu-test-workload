@@ -306,7 +306,7 @@ class CheckpointManager:
         raise TimeoutError(f"Workload not ready after {timeout}s")
 
     def pre_dump(self, host: str, pid: str, iteration: int, username: str = 'ubuntu',
-                 workload_type: str = None) -> Dict[str, Any]:
+                 workload_type: str = None, s3_config=None) -> Dict[str, Any]:
         """
         Perform CRIU pre-dump.
 
@@ -339,6 +339,11 @@ class CheckpointManager:
         # Add --prev-images-dir for iterations after the first
         if iteration > 1:
             criu_cmd += f" --prev-images-dir ../{iteration - 1}"
+
+        # Add --object-storage-upload for direct S3 upload
+        if s3_config is not None:
+            upload_args = s3_config.get_criu_upload_args()
+            criu_cmd += " " + " ".join(upload_args)
 
         logger.info(f"Pre-dump iteration {iteration} on {host} (log: {log_file})")
 
@@ -384,7 +389,8 @@ class CheckpointManager:
     def final_dump(self, host: str, pid: str, last_iteration: int,
                    lazy_config: LazyConfig = None,
                    username: str = 'ubuntu',
-                   workload_type: str = None) -> Dict[str, Any]:
+                   workload_type: str = None,
+                   s3_config=None) -> Dict[str, Any]:
         """
         Perform final CRIU dump.
 
@@ -433,6 +439,10 @@ class CheckpointManager:
         # This starts the page-server that serves pages over network
         if lazy_config.requires_page_server():
             criu_cmd_parts.extend(lazy_config.get_dump_args())
+
+        # Add --object-storage-upload for direct S3 upload (zero local disk I/O)
+        if s3_config is not None:
+            criu_cmd_parts.extend(s3_config.get_criu_upload_args())
 
         criu_cmd = " ".join(criu_cmd_parts)
 

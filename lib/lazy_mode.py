@@ -79,6 +79,10 @@ class LazyConfig:
     # Async prefetch settings (for *_PREFETCH modes, requires S3)
     prefetch_workers: int = 4
 
+    # Ablation options
+    no_semi_sync_iov: bool = False    # Disable semi-sync IOV fetch (page-by-page fallback)
+    no_hot_vma_seed: bool = False     # Disable hot VMA priority seeding
+
     def __post_init__(self):
         """Validate and normalize configuration."""
         if isinstance(self.mode, str):
@@ -127,7 +131,10 @@ class LazyConfig:
         if not self.requires_lazy_pages():
             return []
 
-        return ["--lazy-pages"]
+        args = ["--lazy-pages"]
+        if self.no_semi_sync_iov:
+            args.append("--no-semi-sync-iov")
+        return args
 
     def get_lazy_pages_daemon_args(self, page_server_host: Optional[str] = None) -> list:
         """
@@ -155,6 +162,12 @@ class LazyConfig:
         # Async prefetch from S3 (pre-copy, S3 args must be added separately)
         if self.has_async_prefetch():
             args.extend(["--async-prefetch", "--prefetch-workers", str(self.prefetch_workers)])
+            if self.no_hot_vma_seed:
+                args.append("--no-hot-vma-seed")
+
+        # Ablation: disable semi-sync IOV fetch
+        if self.no_semi_sync_iov:
+            args.append("--no-semi-sync-iov")
 
         return args
 

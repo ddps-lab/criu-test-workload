@@ -60,6 +60,9 @@ class S3Config:
     access_key: str = ""
     secret_key: str = ""
 
+    # MinIO / path-style
+    path_style: bool = False
+
     def __post_init__(self):
         """Validate and normalize configuration."""
         # Convert string types to enum if needed
@@ -140,6 +143,46 @@ class S3Config:
             cmd += " --exclude 'pages-*.img'"
 
         return cmd
+
+    def get_criu_upload_args(self) -> List[str]:
+        """
+        Generate CRIU arguments for --object-storage-upload (dump-side).
+        Uploads checkpoint directly to S3 without local disk staging.
+
+        Returns:
+            List of CRIU command line arguments
+        """
+        args = ["--object-storage-upload"]
+
+        # Endpoint URL (use upload endpoint, not download)
+        upload_endpoint = f"https://s3.{self.upload_region}.amazonaws.com" if self.upload_region else self.download_endpoint
+        args.extend(["--object-storage-endpoint-url", upload_endpoint])
+
+        # Bucket
+        if self.upload_bucket:
+            args.extend(["--object-storage-bucket", self.upload_bucket])
+
+        # Object prefix
+        if self.upload_prefix:
+            args.extend(["--object-storage-object-prefix", f"{self.upload_prefix}/"])
+
+        # Credentials
+        if self.access_key:
+            args.extend(["--aws-access-key", self.access_key])
+        if self.secret_key:
+            args.extend(["--aws-secret-key", self.secret_key])
+        if self.upload_region:
+            args.extend(["--aws-region", self.upload_region])
+
+        # Express One Zone
+        if self.s3_type == S3Type.EXPRESS_ONE_ZONE:
+            args.append("--express-one-zone")
+
+        # Path style (for MinIO)
+        if hasattr(self, 'path_style') and self.path_style:
+            args.append("--object-storage-path-style")
+
+        return args
 
     def get_criu_object_storage_args(self) -> List[str]:
         """

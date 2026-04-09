@@ -557,6 +557,8 @@ class CRIUExperiment:
             mode=LazyMode(lazy_mode_str),
             page_server_port=strategy.get('page_server_port', 27),
             prefetch_workers=strategy.get('prefetch_workers', 4),
+            no_semi_sync_iov=strategy.get('no_semi_sync_iov', False),
+            no_hot_vma_seed=strategy.get('no_hot_vma_seed', False),
         )
 
         # Get workload type for CRIU flags
@@ -571,13 +573,19 @@ class CRIUExperiment:
 
         self.metrics.start_timer('final_dump')
 
+        # Pass S3 config for direct upload if enabled
+        s3_cfg = None
+        if strategy.get('s3_direct_upload', False) and hasattr(self, 's3_config'):
+            s3_cfg = self.s3_config
+
         result = self.checkpoint_mgr.final_dump(
             self.source_host,
             self.workload_pid,
             self.checkpoint_iteration,
             lazy_config=lazy_config,
             username=self.ssh_user,
-            workload_type=workload_type
+            workload_type=workload_type,
+            s3_config=s3_cfg
         )
 
         if not result['success']:

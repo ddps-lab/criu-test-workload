@@ -364,6 +364,33 @@ def parse_args():
         help='Number of prefetch worker threads for lazy-prefetch modes (default: 4)'
     )
 
+    # Ablation options (for performance analysis)
+    ablation_group = parser.add_argument_group('Ablation Options')
+    ablation_group.add_argument(
+        '--no-semi-sync-iov',
+        action='store_true',
+        default=False,
+        help='Disable semi-synchronous IOV fetch (page-by-page fallback for ablation)'
+    )
+    ablation_group.add_argument(
+        '--no-hot-vma-seed',
+        action='store_true',
+        default=False,
+        help='Disable hot VMA priority seeding in async prefetch'
+    )
+    ablation_group.add_argument(
+        '--s3-direct-upload',
+        action='store_true',
+        default=False,
+        help='Use CRIU --object-storage-upload for direct S3 upload (zero disk I/O)'
+    )
+    ablation_group.add_argument(
+        '--s3-path-style',
+        action='store_true',
+        default=False,
+        help='Use path-style URLs for S3 (required for MinIO)'
+    )
+
     # Output
     parser.add_argument(
         '--output', '-o',
@@ -534,6 +561,16 @@ def build_overrides(args) -> dict:
         overrides['checkpoint.strategy.page_server_port'] = args.page_server_port
     if args.prefetch_workers:
         overrides['checkpoint.strategy.prefetch_workers'] = args.prefetch_workers
+
+    # Ablation options
+    if args.no_semi_sync_iov:
+        overrides['checkpoint.strategy.no_semi_sync_iov'] = True
+    if args.no_hot_vma_seed:
+        overrides['checkpoint.strategy.no_hot_vma_seed'] = True
+    if args.s3_direct_upload:
+        overrides['checkpoint.strategy.s3_direct_upload'] = True
+    if args.s3_path_style:
+        overrides['s3.path_style'] = True
 
     # Transfer overrides
     if args.transfer_method:

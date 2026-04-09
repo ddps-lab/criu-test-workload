@@ -63,8 +63,8 @@ def start_memcached_server(port: int, memory_mb: int, threads: int = 1) -> subpr
 
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         preexec_fn=None if os.environ.get("CRIU_NO_SETSID") else os.setsid,
     )
     return process
@@ -203,8 +203,8 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
 
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     return process
 
@@ -276,18 +276,20 @@ def run_memcached_workload(
 
     if load_proc.returncode != 0:
         print(f"[Memcached] ERROR: YCSB load failed (exit={load_proc.returncode})")
-        stderr_text = load_stderr.decode('utf-8', errors='replace')
-        for line in stderr_text.strip().split('\n')[-10:]:
-            print(f"[Memcached]   {line}")
+        if load_stderr:
+            stderr_text = load_stderr.decode('utf-8', errors='replace')
+            for line in stderr_text.strip().split('\n')[-10:]:
+                print(f"[Memcached]   {line}")
         mc_process.terminate()
         sys.exit(1)
 
     # Parse load throughput
-    load_output = load_stdout.decode('utf-8', errors='replace')
-    for line in load_output.split('\n'):
-        if '[OVERALL], Throughput' in line:
-            print(f"[Memcached] YCSB load: {line.strip()}")
-            break
+    if load_stdout:
+        load_output = load_stdout.decode('utf-8', errors='replace')
+        for line in load_output.split('\n'):
+            if '[OVERALL], Throughput' in line:
+                print(f"[Memcached] YCSB load: {line.strip()}")
+                break
 
     # Get memory stats after load
     stats = get_memcached_stats('localhost', port)
@@ -351,10 +353,11 @@ def run_memcached_workload(
             # Check if YCSB finished
             if run_proc.poll() is not None and not ycsb_finished:
                 ycsb_finished = True
-                stdout_data = run_proc.stdout.read().decode('utf-8', errors='replace')
-                for line in stdout_data.split('\n'):
-                    if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
-                        print(f"[Memcached] YCSB: {line.strip()}")
+                if run_proc.stdout:
+                    stdout_data = run_proc.stdout.read().decode('utf-8', errors='replace')
+                    for line in stdout_data.split('\n'):
+                        if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
+                            print(f"[Memcached] YCSB: {line.strip()}")
                 print(f"[Memcached] YCSB run finished (exit={run_proc.returncode})")
                 if keep_running:
                     print(f"[Memcached] YCSB done, exiting")
