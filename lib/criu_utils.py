@@ -260,7 +260,7 @@ class CRIUExperiment:
         # Dirty page tracking state
         self._dirty_tracker: Optional[RemoteDirtyTracker] = None
         self._dirty_tracking_enabled = self.experiment_config.get('track_dirty_pages', False)
-        self._dirty_track_interval = self.experiment_config.get('dirty_track_interval', 100)
+        self._dirty_track_interval = self.experiment_config.get('dirty_track_interval', 5000)
         self._dirty_no_clear = self.experiment_config.get('dirty_no_clear', False)
         logger.info(f"Dirty tracking config: enabled={self._dirty_tracking_enabled}, "
                      f"interval={self._dirty_track_interval}ms, no_clear={self._dirty_no_clear}")
@@ -300,6 +300,8 @@ class CRIUExperiment:
                 logger.info(f"Dirty tracking not started (enabled={self._dirty_tracking_enabled})")
 
             # Step 3: Run checkpoint strategy
+            # Note: dirty tracker is stopped inside strategy methods
+            # (just before dump) because uffd-wp fd blocks CRIU dump.
             strategy_mode = self.checkpoint_config['strategy']['mode']
             if strategy_mode == 'predump':
                 self._run_predump_strategy()
@@ -308,9 +310,9 @@ class CRIUExperiment:
             else:
                 raise ValueError(f"Unknown checkpoint strategy: {strategy_mode}")
 
-            # Step 3.5: Stop dirty page tracking before transfer
-            if self._dirty_tracker is not None:
-                self._stop_dirty_tracking()
+            # Step 3.5: Extract hot VMAs and upload to S3
+            if self._dirty_tracking_enabled and hasattr(self, 'final_checkpoint_dir'):
+                self._extract_and_upload_hot_vmas()
 
             # Step 4: Transfer checkpoint
             self._transfer_checkpoint()
@@ -387,10 +389,76 @@ class CRIUExperiment:
         logger.info("Stopping dirty page tracking...")
         self._dirty_tracker.stop()
 
-        # Note: Results are collected later by baseline_experiment.py via collect_dirty_pattern()
-        # The tracker writes to /tmp/dirty_pattern.json on the remote host
-
+        # Results are on remote host at /tmp/dirty_pattern.json
         self._dirty_tracker = None
+
+    def _extract_and_upload_hot_vmas(self):
+        """Extract hot VMAs from dirty tracker output and upload to S3."""
+        import subprocess
+        import tempfile
+        from .hot_vma import extract_and_save
+
+        strategy = self.checkpoint_config.get('strategy', {})
+        if strategy.get('no_hot_vma_seed', False):
+            logger.info("Hot VMA seeding disabled (--no-hot-vma-seed)")
+            return
+
+        # 1. Download dirty_pattern.json from source
+        local_dirty = '/tmp/_dirty_pattern_tmp.json'
+        cmd = (f"scp -o StrictHostKeyChecking=no "
+               f"{self.ssh_user}@{self.source_host}:/tmp/dirty_pattern.json "
+               f"{local_dirty}")
+        ret = subprocess.run(cmd, shell=True, capture_output=True, timeout=30)
+        if ret.returncode != 0:
+            logger.warning("No dirty_pattern.json on source, skipping hot VMA extraction")
+            return
+
+        # 2. Extract hot VMAs locally
+        local_hot_vmas = '/tmp/_hot_vmas_tmp.json'
+        try:
+            hot_path = extract_and_save(local_dirty, '/tmp')
+            import shutil
+            shutil.move(hot_path, local_hot_vmas)
+        except Exception as e:
+            logger.warning(f"Hot VMA extraction failed: {e}")
+            return
+
+        # 3. Upload to S3 or copy to dump dir
+        if strategy.get('s3_direct_upload', False):
+            s3_dict = self.config.get('s3', {})
+            prefix = s3_dict.get('prefix', '').strip('/')
+            bucket = s3_dict.get('upload_bucket', '')
+            endpoint = s3_dict.get('download_endpoint', '')
+            access_key = s3_dict.get('access_key', '')
+            secret_key = s3_dict.get('secret_key', '')
+            path_style = s3_dict.get('path_style', False)
+
+            s3_key = f"{prefix}/hot-vmas.json" if prefix else "hot-vmas.json"
+
+            # Use aws CLI or curl to upload
+            env = {
+                'AWS_ACCESS_KEY_ID': access_key,
+                'AWS_SECRET_ACCESS_KEY': secret_key,
+            }
+            s3_uri = f"s3://{bucket}/{s3_key}"
+            aws_cmd = f"aws s3 cp {local_hot_vmas} {s3_uri}"
+            if path_style and endpoint:
+                aws_cmd += f" --endpoint-url {endpoint}"
+
+            upload_ret = subprocess.run(
+                aws_cmd, shell=True, capture_output=True, timeout=30,
+                env={**subprocess.os.environ, **env}
+            )
+            if upload_ret.returncode == 0:
+                logger.info(f"Uploaded hot-vmas.json to {s3_uri}")
+            else:
+                logger.warning(f"Failed to upload hot-vmas.json: {upload_ret.stderr.decode()}")
+        else:
+            # Copy to dump dir on source via SCP
+            source_client = self.checkpoint_mgr.get_ssh_client(self.source_host, self.ssh_user)
+            cmd = f"scp -o StrictHostKeyChecking=no {local_hot_vmas} {self.ssh_user}@{self.source_host}:{self.final_checkpoint_dir}/hot-vmas.json"
+            subprocess.run(cmd, shell=True, capture_output=True, timeout=30)
+            logger.info(f"Copied hot-vmas.json to {self.final_checkpoint_dir} on source")
 
     def _start_workload(self):
         """Start workload process on source node."""
@@ -483,6 +551,10 @@ class CRIUExperiment:
 
         logger.info(f"Completed {num_iterations} pre-dump iterations")
 
+        # Stop dirty tracking just before dump (uffd-wp fd blocks CRIU dump)
+        if self._dirty_tracker is not None:
+            self._stop_dirty_tracking()
+
         # Final dump
         self._run_final_dump()
 
@@ -505,6 +577,10 @@ class CRIUExperiment:
             # Time-based trigger: wait fixed duration
             logger.info(f"Waiting {wait_time}s before dump...")
             time.sleep(wait_time)
+
+        # Stop dirty tracking just before dump (uffd-wp fd blocks CRIU dump)
+        if self._dirty_tracker is not None:
+            self._stop_dirty_tracking()
 
         self._run_final_dump()
 
@@ -729,7 +805,9 @@ class CRIUExperiment:
         self.metrics.start_timer('restore')
 
         # Choose restore method based on whether S3 is needed
-        if lazy_config.requires_s3() and transfer_method == 's3':
+        s3_direct = self.checkpoint_config.get('strategy', {}).get('s3_direct_upload', False)
+        use_s3_restore = lazy_config.requires_s3() and (transfer_method == 's3' or s3_direct)
+        if use_s3_restore:
             # Use S3-based restore for LAZY_PREFETCH and LIVE_MIGRATION_PREFETCH
             s3_config = S3Config.from_dict(self.config.get('s3', {}))
             result = self.checkpoint_mgr.restore_with_s3(

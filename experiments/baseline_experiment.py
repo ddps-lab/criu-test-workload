@@ -36,6 +36,7 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lib import CRIUExperiment, ConfigLoader
+from lib.criu_metrics import collect_criu_metrics
 from workloads import WorkloadFactory
 
 
@@ -467,8 +468,8 @@ def parse_args():
     dirty_group.add_argument(
         '--dirty-track-interval',
         type=int,
-        default=100,
-        help='Dirty page tracking interval in milliseconds (default: 100)'
+        default=None,
+        help='Dirty page tracking interval in milliseconds (default: 5000)'
     )
     dirty_group.add_argument(
         '--dirty-track-duration',
@@ -738,6 +739,66 @@ def main():
                     print(f"Lazy-pages: timeout ({lp.get('error', 'unknown')})")
 
             print("=" * 60)
+
+            # Collect CRIU-level metrics from lazy-pages and restore logs
+            # Wait for lazy-pages daemon to finish (it exits after all pages are served)
+            ssh_user = experiment.nodes_config.get('ssh_user', 'ubuntu')
+            checkpoint_dir = experiment.final_checkpoint_dir
+            lazy_mode = experiment.config.get('checkpoint', {}).get('strategy', {}).get('lazy_mode', 'none')
+            if lazy_mode not in ('none',):
+                import subprocess as _sp
+                for _ in range(30):
+                    ret = _sp.run(
+                        f"ssh -o StrictHostKeyChecking=no {ssh_user}@{experiment.dest_host} "
+                        f"'pgrep -f criu.*lazy-pages'",
+                        shell=True, capture_output=True, timeout=5
+                    )
+                    if ret.returncode != 0:
+                        break
+                    time.sleep(1)
+                else:
+                    logger.warning("lazy-pages daemon did not exit within 30s")
+            try:
+                # Collect from dest (restore/lazy-pages logs)
+                criu_metrics_dest = collect_criu_metrics(
+                    experiment.dest_host, checkpoint_dir, ssh_user
+                )
+                # Collect from source (dump log)
+                criu_metrics_src = collect_criu_metrics(
+                    experiment.source_host, checkpoint_dir, ssh_user
+                )
+                criu_metrics = {**criu_metrics_dest, **criu_metrics_src}
+
+                if criu_metrics:
+                    result['metrics']['criu_metrics'] = criu_metrics
+                    # Print summary
+                    lp = criu_metrics.get('lazy_pages', {})
+                    cache = lp.get('cache', {})
+                    ctrl = lp.get('controller', {})
+                    pf = lp.get('prefetch', {})
+                    uffd = lp.get('uffd_summary', {})
+
+                    if cache.get('hit_rate') is not None:
+                        print(f"\nCRIU Lazy-Pages Metrics:")
+                        print(f"  Cache hit rate: {cache.get('hit_rate', 0):.1f}%"
+                              f" ({cache.get('hits', 0)}/{cache.get('lookups', 0)})")
+                        print(f"  Prefetch: {pf.get('completed', 0)} IOVs,"
+                              f" {pf.get('bytes_prefetched', 0) / 1024 / 1024:.1f} MB")
+                        print(f"  Faults: {ctrl.get('faults_processed', 0)}"
+                              f" (hot={ctrl.get('hot_vma_faults', 0)},"
+                              f" cold={ctrl.get('cold_vma_faults', 0)})")
+                        print(f"  UFFD pages: {uffd.get('total_pages_transferred', 0)}"
+                              f" ({uffd.get('total_bytes_transferred', 0) / 1024 / 1024:.1f} MB)")
+                        if lp.get('daemon_duration_s'):
+                            print(f"  Daemon duration: {lp['daemon_duration_s']:.2f}s")
+                    # Re-save metrics with CRIU data included
+                    if args.output:
+                        import json as _json
+                        with open(args.output, 'w') as f:
+                            _json.dump(result['metrics'], f, indent=2, default=str)
+            except Exception as e:
+                logger.warning(f"Failed to collect CRIU metrics: {e}")
+                import traceback; traceback.print_exc()
 
             # Track output directory for logs and dirty pattern
             log_result = None

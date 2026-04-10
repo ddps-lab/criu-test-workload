@@ -5,9 +5,16 @@ experiment:
   description: "Memcached with lazy restore and async prefetch from object storage"
 
 checkpoint:
+  dirs:
+    working_dir: "/tmp/criu_checkpoint"
+
   strategy:
     mode: "full"
     wait_before_dump: 60  # Wait 60s for YCSB load + run phase
+
+transfer:
+  method: "rsync"
+  dest_dir: "/tmp/criu_checkpoint"
 
 workload:
   memcached:
