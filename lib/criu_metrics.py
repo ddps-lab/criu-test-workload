@@ -188,12 +188,20 @@ def parse_lazy_pages_log(log_content: str) -> Dict[str, Any]:
             'stall_ms_max': round(max(all_stalls), 3) if all_stalls else 0,
             'stall_ms_p50': round(sorted(all_stalls)[len(all_stalls)//2], 3) if all_stalls else 0,
             's3_stall_ms_avg': round(sum(s3_stalls) / len(s3_stalls), 3) if s3_stalls else 0,
+            's3_stall_ms_min': round(min(s3_stalls), 3) if s3_stalls else 0,
+            's3_stall_ms_max': round(max(s3_stalls), 3) if s3_stalls else 0,
+            's3_stall_ms_p50': round(sorted(s3_stalls)[len(s3_stalls)//2], 3) if s3_stalls else 0,
             'cache_stall_ms_avg': round(sum(cache_stalls) / len(cache_stalls), 3) if cache_stalls else 0,
+            'cache_stall_ms_min': round(min(cache_stalls), 3) if cache_stalls else 0,
+            'cache_stall_ms_max': round(max(cache_stalls), 3) if cache_stalls else 0,
             'pages_per_fault_avg': round(sum(all_pages) / len(all_pages), 1) if all_pages else 0,
             'pages_per_fault_min': min(all_pages) if all_pages else 0,
             'pages_per_fault_max': max(all_pages) if all_pages else 0,
             's3_pages_per_fault_avg': round(sum(s3_pages) / len(s3_pages), 1) if s3_pages else 0,
         }
+        # Raw fault event list for detailed analysis
+        metrics['fault_events'] = fault_events
+
     else:
         # Fallback: count PAGE FAULT keywords
         fault_count = log_content.count('PAGE FAULT at')
