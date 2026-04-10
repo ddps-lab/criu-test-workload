@@ -161,14 +161,17 @@ class RemoteDirtyTracker:
 
         import subprocess
 
-        # Send SIGTERM to allow graceful shutdown and JSON output
+        # Send SIGTERM to allow graceful shutdown (uffd cleanup + JSON output)
         cmd = f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} 'sudo kill -TERM {self.tracker_pid} 2>/dev/null || true'"
         try:
             subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
             logger.info(f"Stopped dirty tracking on {self.host} (was using {self._selected_tracker} tracker)")
-            # Give it time to write output
+            # Wait for tracker process to actually exit (uffd cleanup may take time)
             import time
-            time.sleep(1)
+            wait_cmd = (f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} "
+                        f"'for i in $(seq 30); do kill -0 {self.tracker_pid} 2>/dev/null || exit 0; sleep 1; done; "
+                        f"sudo kill -9 {self.tracker_pid} 2>/dev/null'")
+            subprocess.run(wait_cmd, shell=True, capture_output=True, timeout=40)
             return True
         except Exception as e:
             logger.warning(f"Failed to stop dirty tracking: {e}")

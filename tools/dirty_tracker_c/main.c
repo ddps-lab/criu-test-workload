@@ -1132,9 +1132,30 @@ static int cleanup_userfaultfd_wp_for_process(process_tracker_t *pt)
     }
 
     /* 6. Close userfaultfd in target */
-    inject_syscall(pid, saved_regs.rip,
-                   __NR_close, pt->target_uffd, 0, 0, 0, 0, 0, &result);
-    fprintf(stderr, "Closed uffd fd=%ld in target process %d\n", pt->target_uffd, pid);
+    if (inject_syscall(pid, saved_regs.rip,
+                       __NR_close, pt->target_uffd, 0, 0, 0, 0, 0, &result) < 0) {
+        fprintf(stderr, "cleanup: inject close() FAILED for fd=%ld pid=%d\n", pt->target_uffd, pid);
+    } else if (result < 0) {
+        fprintf(stderr, "cleanup: close(fd=%ld) returned %ld in pid=%d (errno?)\n", pt->target_uffd, result, pid);
+    } else {
+        fprintf(stderr, "cleanup: close(fd=%ld) succeeded in pid=%d\n", pt->target_uffd, pid);
+    }
+
+    /* 6b. Verify fd is actually closed */
+    {
+        char fd_path[64];
+        long verify;
+        snprintf(fd_path, sizeof(fd_path), "/proc/%d/fd/%ld", pid, pt->target_uffd);
+        if (access(fd_path, F_OK) == 0) {
+            fprintf(stderr, "WARNING: fd %ld still exists in /proc/%d/fd after close!\n", pt->target_uffd, pid);
+            /* Try closing again via direct syscall */
+            inject_syscall(pid, saved_regs.rip,
+                           __NR_close, pt->target_uffd, 0, 0, 0, 0, 0, &verify);
+            fprintf(stderr, "cleanup: retry close(fd=%ld) result=%ld\n", pt->target_uffd, verify);
+        } else {
+            fprintf(stderr, "cleanup: verified fd %ld is closed in pid=%d\n", pt->target_uffd, pid);
+        }
+    }
 
     /* 7. Free scratch page */
     inject_syscall(pid, saved_regs.rip,

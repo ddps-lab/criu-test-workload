@@ -359,9 +359,13 @@ def run_memcached_workload(
                         if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
                             print(f"[Memcached] YCSB: {line.strip()}")
                 print(f"[Memcached] YCSB run finished (exit={run_proc.returncode})")
-                if keep_running:
+                if not keep_running:
                     print(f"[Memcached] YCSB done, exiting")
                     break
+                # keep_running: stay alive for lazy-pages to complete
+                print(f"[Memcached] YCSB done, keeping memcached alive")
+                while True:
+                    time.sleep(5)
 
             # Progress report
             current_time = time.time()
