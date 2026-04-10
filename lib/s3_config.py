@@ -234,24 +234,16 @@ class S3Config:
         """
         Generate CRIU lazy-pages daemon arguments for S3 object storage.
 
-        This provides S3-specific arguments. Combine with LazyConfig.get_lazy_pages_daemon_args()
-        for complete lazy-pages configuration.
+        Returns only S3-specific arguments (object storage endpoint, bucket, etc.).
+        Async prefetch / ablation args are handled by LazyConfig.get_lazy_pages_daemon_args().
 
         Args:
-            lazy_config: Optional LazyConfig for prefetch settings
+            lazy_config: Unused, kept for API compatibility
 
         Returns:
             List of CRIU lazy-pages command line arguments
         """
-        args = self.get_criu_object_storage_args()
-
-        # Async prefetch options (from LazyConfig if provided)
-        if lazy_config and lazy_config.has_async_prefetch():
-            args.append("--async-prefetch")
-            args.append("--prefetch-workers")
-            args.append(str(lazy_config.prefetch_workers))
-
-        return args
+        return self.get_criu_object_storage_args()
 
     @classmethod
     def from_dict(cls, config: dict) -> 'S3Config':

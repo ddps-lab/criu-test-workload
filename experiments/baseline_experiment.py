@@ -390,6 +390,12 @@ def parse_args():
         help='Disable semi-synchronous IOV fetch (page-by-page fallback for ablation)'
     )
     ablation_group.add_argument(
+        '--no-async-prefetch',
+        action='store_true',
+        default=False,
+        help='Disable async prefetch workers (keep S3 lazy restore + semi-sync)'
+    )
+    ablation_group.add_argument(
         '--no-hot-vma-seed',
         action='store_true',
         default=False,
@@ -421,6 +427,15 @@ def parse_args():
         default='INFO',
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
         help='Logging level'
+    )
+
+    # Restore-only mode
+    parser.add_argument(
+        '--restore-only',
+        action='store_true',
+        default=False,
+        help='Skip dump phase; restore from existing S3 checkpoint. '
+             'Requires S3 config pointing to a previous dump.'
     )
 
     # Process lifecycle
@@ -598,6 +613,8 @@ def build_overrides(args) -> dict:
     # Ablation options
     if args.no_semi_sync_iov:
         overrides['checkpoint.strategy.no_semi_sync_iov'] = True
+    if args.no_async_prefetch:
+        overrides['checkpoint.strategy.no_async_prefetch'] = True
     if args.no_hot_vma_seed:
         overrides['checkpoint.strategy.no_hot_vma_seed'] = True
     if args.s3_direct_upload:
@@ -679,33 +696,34 @@ def main():
         # Store CLI args in metrics
         experiment.metrics.set_cli_args(vars(args))
 
-        # Create workload
-        workload_type = experiment.config.get('experiment', {}).get('workload_type', 'memory')
-        workload_config = experiment.config.get('workload', {})
-        workload_config['working_dir'] = experiment.checkpoint_config['dirs']['working_dir']
-        workload_config['ssh_user'] = experiment.nodes_config.get('ssh_user', 'ubuntu')
+        # Create and deploy workload (skip for restore-only)
+        if not args.restore_only:
+            workload_type = experiment.config.get('experiment', {}).get('workload_type', 'memory')
+            workload_config = experiment.config.get('workload', {})
+            workload_config['working_dir'] = experiment.checkpoint_config['dirs']['working_dir']
+            workload_config['ssh_user'] = experiment.nodes_config.get('ssh_user', 'ubuntu')
 
-        workload = WorkloadFactory.create(workload_type, workload_config)
-        workload.validate_config()
+            workload = WorkloadFactory.create(workload_type, workload_config)
+            workload.validate_config()
 
-        # Deploy workload to source node
-        logger.info(f"Deploying {workload_type} workload to source node...")
-        if not workload.prepare(experiment.source_host):
-            logger.error("Failed to deploy workload to source node")
-            sys.exit(1)
+            logger.info(f"Deploying {workload_type} workload to source node...")
+            if not workload.prepare(experiment.source_host):
+                logger.error("Failed to deploy workload to source node")
+                sys.exit(1)
 
-        # Also deploy to destination (for restore)
-        logger.info(f"Deploying {workload_type} workload to destination node...")
-        if not workload.prepare(experiment.dest_host):
-            logger.error("Failed to deploy workload to destination node")
-            sys.exit(1)
+            logger.info(f"Deploying {workload_type} workload to destination node...")
+            if not workload.prepare(experiment.dest_host):
+                logger.error("Failed to deploy workload to destination node")
+                sys.exit(1)
 
-        # Set workload on experiment
-        experiment.set_workload(workload)
+            experiment.set_workload(workload)
 
-        # Run experiment (dirty tracking is handled automatically inside run() if enabled)
-        logger.info("Starting experiment...")
-        result = experiment.run()
+        # Run experiment
+        if args.restore_only:
+            logger.info("Starting restore-only experiment...")
+        else:
+            logger.info("Starting experiment...")
+        result = experiment.run(restore_only=args.restore_only)
 
         if result['success']:
             logger.info("Experiment completed successfully!")

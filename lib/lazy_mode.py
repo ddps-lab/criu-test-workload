@@ -81,6 +81,7 @@ class LazyConfig:
 
     # Ablation options
     no_semi_sync_iov: bool = False    # Disable semi-sync IOV fetch (page-by-page fallback)
+    no_async_prefetch: bool = False   # Disable async prefetch (keep S3 lazy restore)
     no_hot_vma_seed: bool = False     # Disable hot VMA priority seeding
 
     def __post_init__(self):
@@ -102,6 +103,8 @@ class LazyConfig:
 
     def has_async_prefetch(self) -> bool:
         """Check if async prefetch is enabled (requires S3)."""
+        if self.no_async_prefetch:
+            return False
         return self.mode in [LazyMode.LAZY_PREFETCH, LazyMode.LIVE_MIGRATION_PREFETCH]
 
     def get_dump_args(self) -> list:
@@ -174,7 +177,9 @@ class LazyConfig:
     @classmethod
     def from_dict(cls, config: dict) -> 'LazyConfig':
         """
-        Create LazyConfig from dictionary.
+        Create LazyConfig from dictionary (e.g. checkpoint.strategy section).
+
+        Reads all fields including ablation options.
 
         Args:
             config: Configuration dictionary
@@ -183,10 +188,13 @@ class LazyConfig:
             LazyConfig instance
         """
         return cls(
-            mode=LazyMode(config.get('mode', 'none')),
+            mode=LazyMode(config.get('lazy_mode', config.get('mode', 'none'))),
             page_server_port=config.get('page_server_port', 27),
             page_server_address=config.get('page_server_address', '0.0.0.0'),
             prefetch_workers=config.get('prefetch_workers', 4),
+            no_semi_sync_iov=config.get('no_semi_sync_iov', False),
+            no_async_prefetch=config.get('no_async_prefetch', False),
+            no_hot_vma_seed=config.get('no_hot_vma_seed', False),
         )
 
     def to_dict(self) -> dict:
@@ -201,4 +209,7 @@ class LazyConfig:
             'page_server_port': self.page_server_port,
             'page_server_address': self.page_server_address,
             'prefetch_workers': self.prefetch_workers,
+            'no_semi_sync_iov': self.no_semi_sync_iov,
+            'no_async_prefetch': self.no_async_prefetch,
+            'no_hot_vma_seed': self.no_hot_vma_seed,
         }

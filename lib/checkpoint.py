@@ -1281,7 +1281,16 @@ class CheckpointManager:
             logger.info(f"Starting lazy-pages daemon on {host} (mode={lazy_config.mode.value}, log: {lazy_pages_log_file})")
             logger.debug(f"Lazy-pages command: {lazy_pages_cmd}")
             client.execute_background(lazy_pages_cmd)
-            time.sleep(2)  # Give lazy-pages time to start
+
+            # Wait for lazy-pages socket to appear (daemon ready)
+            socket_path = f"{checkpoint_dir}/lazy-pages.socket"
+            for _i in range(50):  # 5s max
+                out, _, rc = client.execute(f"test -S {socket_path} && echo ready", timeout=5)
+                if rc == 0 and 'ready' in (out or ''):
+                    break
+                time.sleep(0.1)
+            else:
+                logger.warning("lazy-pages socket not found after 5s, proceeding anyway")
 
             # Add lazy-pages option to restore command
             criu_cmd_parts.extend(lazy_config.get_restore_args())

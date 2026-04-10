@@ -274,9 +274,12 @@ class CRIUExperiment:
         """
         self.workload = workload
 
-    def run(self) -> Dict[str, Any]:
+    def run(self, restore_only: bool = False) -> Dict[str, Any]:
         """
-        Execute the complete experiment.
+        Execute the complete experiment, or restore-only from existing checkpoint.
+
+        Args:
+            restore_only: If True, skip workload/dump and use existing S3 checkpoint.
 
         Returns:
             Dictionary with experiment results and metrics
@@ -286,39 +289,10 @@ class CRIUExperiment:
             logger.info(f"Workload: {self.experiment_config['workload_type']}")
             logger.info(f"Source: {self.source_host}, Destination: {self.dest_host}")
 
-            # Step 1: Prepare nodes
-            self._prepare_nodes()
-
-            # Step 2: Start workload
-            self._start_workload()
-
-            # Step 2.5: Start dirty page tracking if enabled
-            logger.info(f"Dirty tracking check: enabled={self._dirty_tracking_enabled}, pid={self.workload_pid}")
-            if self._dirty_tracking_enabled and self.workload_pid:
-                self._start_dirty_tracking()
+            if restore_only:
+                self._run_restore_only()
             else:
-                logger.info(f"Dirty tracking not started (enabled={self._dirty_tracking_enabled})")
-
-            # Step 3: Run checkpoint strategy
-            # Note: dirty tracker is stopped inside strategy methods
-            # (just before dump) because uffd-wp fd blocks CRIU dump.
-            strategy_mode = self.checkpoint_config['strategy']['mode']
-            if strategy_mode == 'predump':
-                self._run_predump_strategy()
-            elif strategy_mode == 'full':
-                self._run_full_dump_strategy()
-            else:
-                raise ValueError(f"Unknown checkpoint strategy: {strategy_mode}")
-
-            # Step 3.5: Extract hot VMAs and upload to S3
-            if self._dirty_tracking_enabled and hasattr(self, 'final_checkpoint_dir'):
-                self._extract_and_upload_hot_vmas()
-
-            # Step 4: Transfer checkpoint
-            self._transfer_checkpoint()
-
-            # Step 5: Restore on destination
-            self._restore()
+                self._run_full_experiment()
 
             # Step 6: Finalize metrics
             final_metrics = self.metrics.finalize()
@@ -349,6 +323,116 @@ class CRIUExperiment:
 
             # Clean up SSH connections
             self.checkpoint_mgr.close_all_connections()
+
+    def _run_restore_only(self):
+        """Restore from an existing checkpoint on S3 (no dump phase)."""
+        strategy = self.checkpoint_config['strategy']
+        working_dir = self.checkpoint_config['dirs']['working_dir']
+
+        # Set checkpoint state as if dump just happened
+        self.checkpoint_iteration = strategy.get('restore_iteration', 1)
+        self.final_checkpoint_dir = f"{working_dir}/{self.checkpoint_iteration}"
+
+        # Build LazyConfig for this restore
+        self.lazy_config = LazyConfig.from_dict(strategy)
+
+        logger.info(f"Restore-only mode: dir={self.final_checkpoint_dir}, "
+                     f"lazy_mode={self.lazy_config.mode.value}")
+
+        # For rsync/non-lazy mode: download from S3 to source, then rsync to dest
+        s3_direct = strategy.get('s3_direct_upload', False)
+        transfer_method = self.transfer_config.get('method', 'rsync')
+
+        if not s3_direct and transfer_method == 'rsync':
+            self._download_s3_to_local()
+
+        # Prepare dest directory (clean previous run)
+        dest_client = self.checkpoint_mgr.get_ssh_client(self.dest_host, self.ssh_user)
+        dest_client.execute(f"sudo rm -rf {self.final_checkpoint_dir}")
+        dest_client.execute(f"mkdir -p {self.final_checkpoint_dir}")
+
+        # Transfer + Restore
+        self._transfer_checkpoint()
+
+        # Transfer Java aux files if needed
+        workload_type = self.experiment_config.get('workload_type', '')
+        if workload_type in ('memcached', 'redis'):
+            self._transfer_java_aux_files()
+
+        self._restore()
+
+    def _download_s3_to_local(self):
+        """Download checkpoint from S3 to source node for rsync-based restore."""
+        import subprocess
+
+        s3_dict = self.config.get('s3', {})
+        bucket = s3_dict.get('upload_bucket', '')
+        prefix = s3_dict.get('prefix', '').strip('/')
+        endpoint = s3_dict.get('download_endpoint', '')
+        access_key = s3_dict.get('access_key', '')
+        secret_key = s3_dict.get('secret_key', '')
+        path_style = s3_dict.get('path_style', False)
+
+        s3_uri = f"s3://{bucket}/{prefix}/"
+        local_dir = self.final_checkpoint_dir
+
+        # Create dir and download on source
+        source_client = self.checkpoint_mgr.get_ssh_client(self.source_host, self.ssh_user)
+        source_client.execute(f"mkdir -p {local_dir}")
+
+        aws_cmd = f"aws s3 sync {s3_uri} {local_dir}/ --quiet"
+        if path_style and endpoint:
+            aws_cmd += f" --endpoint-url {endpoint}"
+
+        env_prefix = ""
+        if access_key:
+            env_prefix = f"AWS_ACCESS_KEY_ID={access_key} AWS_SECRET_ACCESS_KEY={secret_key} "
+
+        logger.info(f"Downloading checkpoint from S3 to source: {s3_uri} -> {local_dir}")
+        self.metrics.start_timer('s3_download')
+        stdout, stderr, status = source_client.execute(f"{env_prefix}{aws_cmd}", timeout=300)
+        dl_metric = self.metrics.stop_timer('s3_download')
+
+        if status != 0:
+            raise RuntimeError(f"S3 download failed: {stderr}")
+
+        logger.info(f"S3 download completed in {dl_metric.duration:.2f}s")
+
+    def _run_full_experiment(self):
+        """Run the complete dump + transfer + restore experiment."""
+        # Step 1: Prepare nodes
+        self._prepare_nodes()
+
+        # Step 2: Start workload
+        self._start_workload()
+
+        # Step 2.5: Start dirty page tracking if enabled
+        logger.info(f"Dirty tracking check: enabled={self._dirty_tracking_enabled}, pid={self.workload_pid}")
+        if self._dirty_tracking_enabled and self.workload_pid:
+            self._start_dirty_tracking()
+        else:
+            logger.info(f"Dirty tracking not started (enabled={self._dirty_tracking_enabled})")
+
+        # Step 3: Run checkpoint strategy
+        # Note: dirty tracker is stopped inside strategy methods
+        # (just before dump) because uffd-wp fd blocks CRIU dump.
+        strategy_mode = self.checkpoint_config['strategy']['mode']
+        if strategy_mode == 'predump':
+            self._run_predump_strategy()
+        elif strategy_mode == 'full':
+            self._run_full_dump_strategy()
+        else:
+            raise ValueError(f"Unknown checkpoint strategy: {strategy_mode}")
+
+        # Step 3.5: Extract hot VMAs and upload to S3
+        if self._dirty_tracking_enabled and hasattr(self, 'final_checkpoint_dir'):
+            self._extract_and_upload_hot_vmas()
+
+        # Step 4: Transfer checkpoint
+        self._transfer_checkpoint()
+
+        # Step 5: Restore on destination
+        self._restore()
 
     def _prepare_nodes(self):
         """Prepare source and destination nodes."""
@@ -628,14 +712,7 @@ class CRIUExperiment:
         strategy = self.checkpoint_config['strategy']
 
         # Build LazyConfig from strategy settings
-        lazy_mode_str = strategy.get('lazy_mode', 'none')
-        lazy_config = LazyConfig(
-            mode=LazyMode(lazy_mode_str),
-            page_server_port=strategy.get('page_server_port', 27),
-            prefetch_workers=strategy.get('prefetch_workers', 4),
-            no_semi_sync_iov=strategy.get('no_semi_sync_iov', False),
-            no_hot_vma_seed=strategy.get('no_hot_vma_seed', False),
-        )
+        lazy_config = LazyConfig.from_dict(strategy)
 
         # Get workload type for CRIU flags
         workload_type = self.experiment_config.get('workload_type', 'memory')
