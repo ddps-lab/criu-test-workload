@@ -21,7 +21,8 @@ S3_COMMON="--s3-type standard --s3-upload-bucket test-bucket --s3-region us-east
 
 COMMON="--config config/experiments/memcached_lazy_prefetch.yaml \
   --source-ip $SOURCE --dest-ip $DEST \
-  --workload memcached --memcached-memory $MEM_MB --record-count $RECORDS"
+  --workload memcached --memcached-memory $MEM_MB --record-count $RECORDS \
+  --ycsb-threads 4"
 
 cleanup_dest() {
     ssh -o StrictHostKeyChecking=no ubuntu@$DEST \
@@ -50,6 +51,11 @@ echo ""
 echo "================================================================"
 echo "  PHASE 1: DUMP (S3 direct upload + dirty tracker)"
 echo "================================================================"
+
+# Clean S3 prefix before dump
+echo "[cleanup] Cleaning S3 prefix: s3://test-bucket/$S3_PREFIX/"
+AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
+    aws --endpoint-url $MINIO s3 rm "s3://test-bucket/$S3_PREFIX/" --recursive --quiet 2>/dev/null || true
 
 cleanup_all
 
@@ -135,8 +141,8 @@ echo "=========================================="
 echo ""
 echo "  Dump duration: ${DUMP_DUR}s (shared across all modes)"
 echo ""
-printf "  %-18s %9s %9s %10s %9s %7s %6s %7s\n" \
-    "Mode" "Transfer" "Restore" "Downtime" "Cache" "Faults" "HotF" "Daemon"
+printf "  %-18s %9s %9s %10s %9s %7s %6s %9s %7s\n" \
+    "Mode" "Transfer" "Restore" "Downtime" "Cache" "Faults" "HotF" "Pages" "Daemon"
 echo "  $(printf '%0.s-' {1..80})"
 
 DUMP_DUR=$(python3 -c "
@@ -166,11 +172,14 @@ else:
 cm = d.get('criu_metrics',{}).get('lazy_pages',{})
 cache = cm.get('cache',{}).get('hit_rate', '-')
 ctrl = cm.get('controller',{})
-faults = ctrl.get('faults_processed', '-')
+# Use controller faults if available, fallback to uffd_faults
+faults = ctrl.get('faults_processed') or cm.get('uffd_faults', '-')
 hot_f = ctrl.get('hot_vma_faults', '-')
+uffd = cm.get('uffd_summary',{})
+pages = uffd.get('total_pages_transferred', '-')
 daemon = cm.get('daemon_duration_s', '-')
 daemon_s = f'{daemon:.1f}' if isinstance(daemon, float) else str(daemon)
-print(f'  {\"$mode\":<18s} {xfer:>8.2f}s {rest:>8.2f}s {downtime:>9.2f}s {str(cache)+\"%\":>8s} {str(faults):>6s} {str(hot_f):>5s} {daemon_s:>6s}s')
+print(f'  {\"$mode\":<18s} {xfer:>8.2f}s {rest:>8.2f}s {downtime:>9.2f}s {str(cache)+\"%\":>8s} {str(faults):>6s} {str(hot_f):>5s} {str(pages):>8s} {daemon_s:>6s}s')
 " 2>/dev/null || printf "  %-18s %10s\n" "$mode" "FAILED"
 done
 echo "  $(printf '%0.s-' {1..80})"

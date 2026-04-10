@@ -123,6 +123,83 @@ def parse_lazy_pages_log(log_content: str) -> Dict[str, Any]:
             if metrics['daemon_duration_s'] is None or ts > metrics['daemon_duration_s']:
                 metrics['daemon_duration_s'] = ts
 
+    # Per-fault analysis from PAGE FAULT / PAGE FAULT SERVED pairs
+    fault_events = []
+    pending_fault = {}  # pid -> timestamp
+    pending_bytes = {}  # pid -> bytes copied in current fault
+    for line in log_content.split('\n'):
+        ts_match = re.match(r'\((\d+\.\d+)\)', line)
+        if not ts_match:
+            continue
+        ts = float(ts_match.group(1))
+
+        # Fault start
+        m = re.search(r'uffd: (\d+)-+\d+: === PAGE FAULT at (0x[0-9a-f]+)', line)
+        if m:
+            pid = m.group(1)
+            pending_fault[pid] = ts
+            pending_bytes[pid] = 0
+
+        # uffd_copy with size
+        m = re.search(r'uffd: (\d+)-+\d+: uffd_copy: 0x[0-9a-f]+/(\d+)', line)
+        if m:
+            pid = m.group(1)
+            if pid in pending_bytes:
+                pending_bytes[pid] += int(m.group(2))
+
+        # Fault served (with source: S3 or CACHE)
+        m = re.search(r'uffd: (\d+)-+\d+: === PAGE FAULT SERVED from (\S+)', line)
+        if m:
+            pid = m.group(1)
+            source = m.group(2)  # "S3" or "CACHE"
+            if pid in pending_fault:
+                stall_ms = (ts - pending_fault[pid]) * 1000
+                served_bytes = pending_bytes.get(pid, 0)
+                fault_events.append({
+                    'stall_ms': round(stall_ms, 3),
+                    'source': source,
+                    'bytes': served_bytes,
+                    'pages': served_bytes // 4096 if served_bytes else 0,
+                })
+                del pending_fault[pid]
+                pending_bytes.pop(pid, None)
+
+    # Fault summary
+    fault_count = len(fault_events)
+    if fault_count > 0:
+        metrics['uffd_faults'] = fault_count
+
+        s3_faults = [f for f in fault_events if f['source'] == 'S3']
+        cache_faults = [f for f in fault_events if f['source'] == 'CACHE']
+
+        all_stalls = [f['stall_ms'] for f in fault_events]
+        s3_stalls = [f['stall_ms'] for f in s3_faults]
+        cache_stalls = [f['stall_ms'] for f in cache_faults]
+
+        all_pages = [f['pages'] for f in fault_events if f['pages'] > 0]
+        s3_pages = [f['pages'] for f in s3_faults if f['pages'] > 0]
+
+        metrics['fault_stats'] = {
+            'total': fault_count,
+            's3_served': len(s3_faults),
+            'cache_served': len(cache_faults),
+            'stall_ms_avg': round(sum(all_stalls) / len(all_stalls), 3) if all_stalls else 0,
+            'stall_ms_min': round(min(all_stalls), 3) if all_stalls else 0,
+            'stall_ms_max': round(max(all_stalls), 3) if all_stalls else 0,
+            'stall_ms_p50': round(sorted(all_stalls)[len(all_stalls)//2], 3) if all_stalls else 0,
+            's3_stall_ms_avg': round(sum(s3_stalls) / len(s3_stalls), 3) if s3_stalls else 0,
+            'cache_stall_ms_avg': round(sum(cache_stalls) / len(cache_stalls), 3) if cache_stalls else 0,
+            'pages_per_fault_avg': round(sum(all_pages) / len(all_pages), 1) if all_pages else 0,
+            'pages_per_fault_min': min(all_pages) if all_pages else 0,
+            'pages_per_fault_max': max(all_pages) if all_pages else 0,
+            's3_pages_per_fault_avg': round(sum(s3_pages) / len(s3_pages), 1) if s3_pages else 0,
+        }
+    else:
+        # Fallback: count PAGE FAULT keywords
+        fault_count = log_content.count('PAGE FAULT at')
+        if fault_count > 0:
+            metrics['uffd_faults'] = fault_count
+
     # Compute aggregates
     if metrics['uffd_transfers']:
         total_pages = sum(t['pages_transferred'] for t in metrics['uffd_transfers'])
@@ -132,6 +209,7 @@ def parse_lazy_pages_log(log_content: str) -> Dict[str, Any]:
             'total_pages_expected': total_expected,
             'total_bytes_transferred': total_pages * 4096,
             'num_processes': len(metrics['uffd_transfers']),
+            'total_faults': fault_count,
         }
 
     if metrics['pre_queue']:

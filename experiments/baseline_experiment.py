@@ -796,17 +796,34 @@ def main():
                     pf = lp.get('prefetch', {})
                     uffd = lp.get('uffd_summary', {})
 
-                    if cache.get('hit_rate') is not None:
+                    if lp:
                         print(f"\nCRIU Lazy-Pages Metrics:")
-                        print(f"  Cache hit rate: {cache.get('hit_rate', 0):.1f}%"
-                              f" ({cache.get('hits', 0)}/{cache.get('lookups', 0)})")
-                        print(f"  Prefetch: {pf.get('completed', 0)} IOVs,"
-                              f" {pf.get('bytes_prefetched', 0) / 1024 / 1024:.1f} MB")
-                        print(f"  Faults: {ctrl.get('faults_processed', 0)}"
-                              f" (hot={ctrl.get('hot_vma_faults', 0)},"
-                              f" cold={ctrl.get('cold_vma_faults', 0)})")
-                        print(f"  UFFD pages: {uffd.get('total_pages_transferred', 0)}"
-                              f" ({uffd.get('total_bytes_transferred', 0) / 1024 / 1024:.1f} MB)")
+                        faults = ctrl.get('faults_processed') or lp.get('uffd_faults', 0)
+                        fs = lp.get('fault_stats', {})
+                        if fs:
+                            print(f"  Faults: {fs['total']}"
+                                  f" (S3={fs['s3_served']}, cache={fs['cache_served']})")
+                            print(f"  Stall: avg={fs['stall_ms_avg']:.1f}ms"
+                                  f" p50={fs['stall_ms_p50']:.1f}ms"
+                                  f" max={fs['stall_ms_max']:.1f}ms")
+                            if fs.get('s3_stall_ms_avg'):
+                                print(f"  S3 stall: avg={fs['s3_stall_ms_avg']:.1f}ms"
+                                      f" | Cache stall: avg={fs['cache_stall_ms_avg']:.1f}ms")
+                            if fs.get('pages_per_fault_avg'):
+                                print(f"  Pages/fault: avg={fs['pages_per_fault_avg']:.0f}"
+                                      f" min={fs['pages_per_fault_min']}"
+                                      f" max={fs['pages_per_fault_max']}")
+                        else:
+                            print(f"  Faults: {faults}")
+                        if uffd:
+                            print(f"  UFFD pages: {uffd.get('total_pages_transferred', 0)}"
+                                  f" ({uffd.get('total_bytes_transferred', 0) / 1024 / 1024:.1f} MB)")
+                        if cache.get('hit_rate') is not None:
+                            print(f"  Cache hit rate: {cache.get('hit_rate', 0):.1f}%"
+                                  f" ({cache.get('hits', 0)}/{cache.get('lookups', 0)})")
+                        if ctrl.get('hot_vma_faults'):
+                            print(f"  Hot VMA faults: {ctrl['hot_vma_faults']}"
+                                  f" / cold: {ctrl.get('cold_vma_faults', 0)}")
                         if lp.get('daemon_duration_s'):
                             print(f"  Daemon duration: {lp['daemon_duration_s']:.2f}s")
                     # Re-save metrics with CRIU data included
