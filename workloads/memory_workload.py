@@ -151,9 +151,6 @@ class MemoryWorkload(BaseWorkload):
         """Get standalone script filename."""
         return 'memory_standalone.py'
 
-    def get_standalone_script_content(self) -> str:
-        """Get standalone script content."""
-        return MEMORY_STANDALONE_SCRIPT
 
     def get_command(self) -> str:
         """

@@ -220,7 +220,7 @@ def run_memcached_workload(
     target_throughput: int = 0,
     duration: int = 0,
     working_dir: str = '.',
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     Main Memcached + YCSB workload.
@@ -459,12 +459,14 @@ def main():
         help='Working directory for signal files'
     )
     parser.add_argument(
-        '--keep-running',
+        '--stop-on-restore',
         action='store_true',
-        help='Keep running after restore (ignore checkpoint_flag removal)'
+        default=False,
+        help='Stop when restore is detected (checkpoint_flag removed). Default: keep running.'
     )
 
     args = parser.parse_args()
+    args.keep_running = not args.stop_on_restore
 
     run_memcached_workload(
         port=args.port,

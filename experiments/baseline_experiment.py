@@ -546,9 +546,9 @@ def build_overrides(args) -> dict:
 
     # Memcached workload
     if args.memcached_memory:
-        overrides['workload.memcached_memory'] = args.memcached_memory
+        overrides['workload.memory_mb'] = args.memcached_memory
     if args.memcached_port:
-        overrides['workload.memcached_port'] = args.memcached_port
+        overrides['workload.port'] = args.memcached_port
     if args.ycsb_workload:
         overrides['workload.ycsb_workload'] = args.ycsb_workload
     if args.ycsb_home:

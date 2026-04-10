@@ -197,8 +197,6 @@ class MLTrainingWorkload(BaseWorkload):
     def get_standalone_script_name(self) -> str:
         return 'ml_training_standalone.py'
 
-    def get_standalone_script_content(self) -> str:
-        return ML_TRAINING_STANDALONE_SCRIPT
 
     def get_command(self) -> str:
         cmd = f"python3 {self.get_standalone_script_name()}"

@@ -49,21 +49,21 @@ class BaseWorkload(ABC):
         """
         pass
 
-    @abstractmethod
     def get_standalone_script_content(self) -> str:
         """
-        Get the content of the standalone script.
+        Get the content of the standalone script for deployment.
 
-        This script will be deployed to workload nodes and should:
-        - Have no external dependencies beyond standard library + specified packages
-        - Create a 'checkpoint_ready' file when ready for checkpointing
-        - Check for 'checkpoint_flag' file to know when restore is complete
-        - Exit cleanly when checkpoint_flag is removed
+        Reads from the actual *_standalone.py file in the workloads directory.
+        This ensures the deployed script is always up-to-date with the source.
 
         Returns:
             Script content as string
         """
-        pass
+        import os
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(script_dir, self.get_standalone_script_name())
+        with open(script_path) as f:
+            return f.read()
 
     @abstractmethod
     def get_command(self) -> str:
