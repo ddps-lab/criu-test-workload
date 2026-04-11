@@ -64,7 +64,7 @@ def run_memory_workload(
     duration: int = 0,
     check_lazy_loading: bool = False,
     working_dir: str = '.',
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     Main memory allocation workload.

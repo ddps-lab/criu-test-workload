@@ -145,7 +145,7 @@ def run_sevenzip_workload(
     seed: int = 42,
     duration: int = 0,
     working_dir: str = '.',
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     Main 7zip compression workload.

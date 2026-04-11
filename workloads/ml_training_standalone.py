@@ -118,7 +118,7 @@ def run_ml_training_workload(
     duration: int = 0,  # 0 = infinite (use epochs limit)
     working_dir: str = '.',
     dataset_size: int = None,  # Override dataset size
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     Main ML training workload.

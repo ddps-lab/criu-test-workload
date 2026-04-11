@@ -240,7 +240,7 @@ def run_video_workload(
     mode: str = 'file',  # 'file' or 'live'
     max_segments: int = 30,
     working_dir: str = '.',
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     Main video processing workload.

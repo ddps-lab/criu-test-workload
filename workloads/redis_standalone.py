@@ -307,7 +307,7 @@ def monitor_ycsb_run(
     target_throughput: int,
     duration: int,
     working_dir: str,
-    keep_running: bool = False,
+    keep_running: bool = True,
 ) -> dict:
     """Start YCSB run phase and monitor for restore.
 
@@ -508,7 +508,7 @@ def run_redis_workload(
     record_count: int = 100000,
     ycsb_threads: int = 1,
     target_throughput: int = 0,
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     Main Redis workload.

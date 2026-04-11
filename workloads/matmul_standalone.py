@@ -52,7 +52,7 @@ def run_matmul_workload(
     interval: float = 0.1,
     duration: int = 0,  # 0 = infinite (use iterations limit)
     working_dir: str = '.',
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     Power Iteration eigenvalue solver workload.

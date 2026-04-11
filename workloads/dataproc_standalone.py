@@ -345,7 +345,7 @@ def run_dataproc_workload(
     batch_size: int = 1000,
     duration: int = 0,  # 0 = infinite (use operations limit)
     working_dir: str = '.',
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     Streaming data processing workload.

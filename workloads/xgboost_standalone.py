@@ -143,7 +143,7 @@ def run_xgboost_workload(
     num_threads: int = 1,
     duration: int = 0,
     working_dir: str = '.',
-    keep_running: bool = False,
+    keep_running: bool = True,
 ):
     """
     XGBoost training workload.
