@@ -825,7 +825,7 @@ def main():
                 for i in range(DAEMON_TIMEOUT):
                     ret = _sp.run(
                         f"ssh -o StrictHostKeyChecking=no {ssh_user}@{experiment.dest_host} "
-                        f"'pgrep -f criu.*lazy-pages'",
+                        f"'pgrep -x criu'",
                         shell=True, capture_output=True, timeout=5
                     )
                     if ret.returncode != 0:
