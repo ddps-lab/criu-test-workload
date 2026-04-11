@@ -88,7 +88,8 @@ MODE_ARGS[3_semi_sync]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON 
 MODE_ARGS[4_async]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-hot-vma-seed"
 MODE_ARGS[5_full]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON"
 
-MODE_ORDER=(1_baseline 2_s3_lazy_only 3_semi_sync 4_async 5_full)
+# Default: skip 2_s3_lazy_only (much slower than baseline on real S3, run separately if needed)
+MODE_ORDER=(1_baseline 3_semi_sync 4_async 5_full)
 
 # ============================================================
 # Cleanup function
