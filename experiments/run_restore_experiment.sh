@@ -181,7 +181,7 @@ run_restore() {
         --name "${mode}_run${run_num}" \
         $args \
         --no-cleanup \
-        -o "$outfile" 2>&1 | tee "$logfile" | grep -E 'COMPLETED|FAILED|Faults|Cache|Daemon|Restore:|ERROR|WARNING'
+        -o "$outfile" 2>"$logfile.err" | tee "$logfile" | grep -E 'COMPLETED|FAILED|Faults|Cache|Daemon|Restore:|ERROR|WARNING' || true
 
     # Save CRIU logs
     if [ -d /tmp/criu_checkpoint/1 ]; then
