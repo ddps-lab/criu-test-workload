@@ -195,6 +195,21 @@ run_restore() {
 }
 
 # ============================================================
+# S3 cache warmup
+# ============================================================
+echo ""
+echo "=========================================="
+echo " S3 Cache Warmup (5 rounds)"
+echo "=========================================="
+for i in $(seq 1 5); do
+    mkdir -p /tmp/s3_warmup
+    aws s3 sync "s3://$S3_BUCKET/$S3_PREFIX/" /tmp/s3_warmup/ --region $S3_REGION --quiet
+    rm -rf /tmp/s3_warmup
+    echo "  warmup $i/5 done"
+done
+echo "Warmup complete."
+
+# ============================================================
 # Main execution
 # ============================================================
 cd /opt/criu_workload
