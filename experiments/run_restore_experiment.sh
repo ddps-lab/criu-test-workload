@@ -17,12 +17,13 @@ set +e  # Don't exit on errors — cleanup commands may return non-zero
 WORKLOAD=""
 S3_PREFIX=""
 REPEAT=5
-MODE=""           # empty = all 5 modes
+MODE=""           # empty = all 4 modes
 EXTRA_ARGS=""
 S3_BUCKET="mhsong-criu-checkpoints"
 S3_RESULTS_BUCKET="mhsong-criu-results"
 S3_REGION="us-west-2"
 S3_ENDPOINT="https://s3.us-west-2.amazonaws.com"
+AUTO_TERMINATE=0
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -33,6 +34,7 @@ while [[ $# -gt 0 ]]; do
         --extra-args)     EXTRA_ARGS="$2"; shift 2 ;;
         --s3-bucket)      S3_BUCKET="$2"; shift 2 ;;
         --s3-results)     S3_RESULTS_BUCKET="$2"; shift 2 ;;
+        --auto-terminate) AUTO_TERMINATE=1; shift ;;
         *)                echo "Unknown: $1"; exit 1 ;;
     esac
 done
@@ -279,3 +281,13 @@ done
 
 echo ""
 echo "Done. Results in $OUTDIR and s3://$S3_RESULTS_BUCKET/$RESULTS_PREFIX/"
+
+# ============================================================
+# Auto-terminate instance if --auto-terminate was set
+# ============================================================
+if [ "$AUTO_TERMINATE" -eq 1 ]; then
+    INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $(curl -s -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')" \
+        http://169.254.169.254/latest/meta-data/instance-id)
+    echo "Auto-terminating instance $INSTANCE_ID..."
+    aws ec2 terminate-instances --instance-ids $INSTANCE_ID --region $S3_REGION
+fi
