@@ -121,7 +121,10 @@ for i in $(seq 0 $((${#EXPERIMENTS[@]} - 1))); do
     # Wait for SSH
     wait_ssh $IP || { echo "ERROR: SSH timeout for $IP"; continue; }
 
-    # Setup SSH keys for self-access
+    # Pull latest code and setup SSH keys
+    ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$IP "
+        cd /opt/criu_workload && git pull origin main -q 2>/dev/null
+    " 2>/dev/null
     ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$IP "
         ssh-keygen -t rsa -N '' -f ~/.ssh/id_rsa -q <<< y >/dev/null 2>&1 || true
         cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
