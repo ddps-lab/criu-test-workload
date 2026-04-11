@@ -360,6 +360,8 @@ class CRIUExperiment:
         # Transfer Java aux files if needed
         workload_type = self.experiment_config.get('workload_type', '')
         if workload_type in ('memcached', 'redis'):
+            # In restore-only mode, try S3 first, then rsync fallback
+            self._download_aux_files_from_s3()
             self._transfer_java_aux_files()
 
         self._restore()
@@ -771,6 +773,64 @@ class CRIUExperiment:
         self.lazy_config = lazy_config  # Store for restore phase
 
         logger.info(f"Final dump completed in {final_dump_metric.duration:.2f}s")
+
+        # Upload auxiliary files (hsperfdata etc.) to S3 for restore-only reuse
+        workload_type = self.experiment_config.get('workload_type', '')
+        if workload_type in ('memcached', 'redis') and s3_cfg:
+            self._upload_aux_files_to_s3(s3_cfg)
+
+    def _upload_aux_files_to_s3(self, s3_config):
+        """Upload Java auxiliary files (hsperfdata) to S3 alongside checkpoint."""
+        try:
+            source_client = self.checkpoint_mgr.get_ssh_client(self.source_host, self.ssh_user)
+            s3_dict = self.config.get('s3', {})
+            bucket = s3_dict.get('upload_bucket', '')
+            prefix = s3_dict.get('prefix', '').strip('/')
+            region = s3_dict.get('region', 'us-west-2')
+            endpoint = s3_dict.get('download_endpoint', '')
+
+            # Tar hsperfdata and upload
+            tar_cmd = "cd /tmp && tar czf /tmp/aux_files.tar.gz hsperfdata_* 2>/dev/null || true"
+            source_client.execute(tar_cmd, timeout=10)
+
+            # Check if tar was created
+            stdout, _, status = source_client.execute("ls -l /tmp/aux_files.tar.gz 2>/dev/null", timeout=5)
+            if status != 0:
+                logger.debug("No auxiliary files to upload")
+                return
+
+            aws_cmd = f"aws s3 cp /tmp/aux_files.tar.gz s3://{bucket}/{prefix}/aux_files.tar.gz --region {region}"
+            if endpoint and 'amazonaws.com' not in endpoint:
+                aws_cmd += f" --endpoint-url {endpoint}"
+            source_client.execute(aws_cmd, timeout=30)
+            logger.info(f"Uploaded auxiliary files to s3://{bucket}/{prefix}/aux_files.tar.gz")
+        except Exception as e:
+            logger.warning(f"Failed to upload aux files to S3: {e}")
+
+    def _download_aux_files_from_s3(self):
+        """Download Java auxiliary files from S3 to destination for restore."""
+        try:
+            s3_dict = self.config.get('s3', {})
+            bucket = s3_dict.get('upload_bucket', '')
+            prefix = s3_dict.get('prefix', '').strip('/')
+            region = s3_dict.get('region', 'us-west-2')
+            endpoint = s3_dict.get('download_endpoint', '')
+
+            dest_client = self.checkpoint_mgr.get_ssh_client(self.dest_host, self.ssh_user)
+
+            aws_cmd = f"aws s3 cp s3://{bucket}/{prefix}/aux_files.tar.gz /tmp/aux_files.tar.gz --region {region}"
+            if endpoint and 'amazonaws.com' not in endpoint:
+                aws_cmd += f" --endpoint-url {endpoint}"
+
+            stdout, stderr, status = dest_client.execute(aws_cmd, timeout=30)
+            if status != 0:
+                logger.debug("No aux_files.tar.gz in S3, skipping")
+                return
+
+            dest_client.execute("cd /tmp && tar xzf aux_files.tar.gz 2>/dev/null || true", timeout=10)
+            logger.info("Downloaded and extracted auxiliary files from S3")
+        except Exception as e:
+            logger.warning(f"Failed to download aux files from S3: {e}")
 
     def _sync_to_medium(self, checkpoint_dir: str) -> Dict[str, Any]:
         """
