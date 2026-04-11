@@ -81,14 +81,16 @@ cd /tmp
 if [ -d "criu-s3" ]; then
     rm -rf criu-s3
 fi
-git clone -b experiment-v2 https://github.com/ddps-lab/criu-s3.git
+git clone -b ddps-dev https://github.com/ddps-lab/criu-s3.git
 cd criu-s3
 make clean || true
 make -j$(nproc)
 
-# Install CRIU binary with proper permissions
+# Install CRIU binary to both /usr/local/bin and /usr/local/sbin
 install -m 755 ./criu/criu /usr/local/bin/criu
+install -m 755 ./criu/criu /usr/local/sbin/criu
 setcap cap_checkpoint_restore+eip /usr/local/bin/criu
+setcap cap_checkpoint_restore+eip /usr/local/sbin/criu
 
 # Verify CRIU installation
 echo "CRIU installed: $(which criu)"
@@ -189,11 +191,22 @@ tee /etc/sysctl.d/99-criu.conf << EOF
 kernel.ns_last_pid = 0
 kernel.unprivileged_userns_clone = 1
 kernel.yama.ptrace_scope = 0
+# Core dump settings for debugging
+kernel.core_pattern = /tmp/core.%e.%p.%t
+fs.suid_dumpable = 2
 EOF
 sysctl --system
 
 # Set ptrace scope immediately
 echo 0 > /proc/sys/kernel/yama/ptrace_scope
+
+# Disable apport (Ubuntu crash reporter) for clean core dumps
+systemctl stop apport 2>/dev/null || true
+systemctl disable apport 2>/dev/null || true
+
+# Set unlimited core dump size for ubuntu user
+echo '* soft core unlimited' >> /etc/security/limits.conf
+echo '* hard core unlimited' >> /etc/security/limits.conf
 
 # Verify installation
 echo ""
