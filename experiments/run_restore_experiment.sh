@@ -9,7 +9,7 @@
 #   bash run_restore_experiment.sh --workload memcached --s3-prefix memcached-4gb --repeat 5 \
 #       --extra-args "--memcached-memory 4096 --record-count 3100000 --ycsb-threads 4"
 
-set -e
+set +e  # Don't exit on errors — cleanup commands may return non-zero
 
 # ============================================================
 # Parse arguments
