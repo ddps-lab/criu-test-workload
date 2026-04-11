@@ -813,22 +813,28 @@ def main():
 
             # Collect CRIU-level metrics from lazy-pages and restore logs
             # Wait for lazy-pages daemon to finish (it exits after all pages are served)
+            # Timeout: 300s (enough for 11GB+ workloads on real S3)
+            DAEMON_TIMEOUT = 300
             ssh_user = experiment.nodes_config.get('ssh_user', 'ubuntu')
             checkpoint_dir = experiment.final_checkpoint_dir
             lazy_mode = experiment.config.get('checkpoint', {}).get('strategy', {}).get('lazy_mode', 'none')
+            daemon_completed = True
             if lazy_mode not in ('none',):
                 import subprocess as _sp
-                for _ in range(30):
+                logger.info(f"Waiting up to {DAEMON_TIMEOUT}s for lazy-pages daemon to complete...")
+                for i in range(DAEMON_TIMEOUT):
                     ret = _sp.run(
                         f"ssh -o StrictHostKeyChecking=no {ssh_user}@{experiment.dest_host} "
                         f"'pgrep -f criu.*lazy-pages'",
                         shell=True, capture_output=True, timeout=5
                     )
                     if ret.returncode != 0:
+                        logger.info(f"lazy-pages daemon exited after {i}s")
                         break
                     time.sleep(1)
                 else:
-                    logger.warning("lazy-pages daemon did not exit within 30s")
+                    logger.warning(f"lazy-pages daemon did not exit within {DAEMON_TIMEOUT}s")
+                    daemon_completed = False
             try:
                 # Collect from dest (restore/lazy-pages logs)
                 criu_metrics_dest = collect_criu_metrics(
