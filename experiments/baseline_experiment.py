@@ -381,6 +381,13 @@ def parse_args():
         help='Number of prefetch worker threads for lazy-prefetch modes (default: 4)'
     )
 
+    s3_group.add_argument(
+        '--cache-limit',
+        type=int,
+        default=None,
+        help='Prefetch cache limit in MB (default: auto). 0=auto, N=explicit N MB'
+    )
+
     # Ablation options (for performance analysis)
     ablation_group = parser.add_argument_group('Ablation Options')
     ablation_group.add_argument(
@@ -609,6 +616,8 @@ def build_overrides(args) -> dict:
         overrides['checkpoint.strategy.page_server_port'] = args.page_server_port
     if args.prefetch_workers:
         overrides['checkpoint.strategy.prefetch_workers'] = args.prefetch_workers
+    if args.cache_limit is not None:
+        overrides['checkpoint.strategy.cache_limit_mb'] = args.cache_limit
 
     # Ablation options
     if args.no_semi_sync_iov:

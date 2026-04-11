@@ -78,6 +78,7 @@ class LazyConfig:
 
     # Async prefetch settings (for *_PREFETCH modes, requires S3)
     prefetch_workers: int = 4
+    cache_limit_mb: int = 0  # 0 = auto, >0 = explicit limit in MB
 
     # Ablation options
     no_semi_sync_iov: bool = False    # Disable semi-sync IOV fetch (page-by-page fallback)
@@ -165,6 +166,8 @@ class LazyConfig:
         # Async prefetch from S3 (pre-copy, S3 args must be added separately)
         if self.has_async_prefetch():
             args.extend(["--async-prefetch", "--prefetch-workers", str(self.prefetch_workers)])
+            if self.cache_limit_mb > 0:
+                args.extend(["--cache-limit", str(self.cache_limit_mb)])
             if self.no_hot_vma_seed:
                 args.append("--no-hot-vma-seed")
 
@@ -192,6 +195,7 @@ class LazyConfig:
             page_server_port=config.get('page_server_port', 27),
             page_server_address=config.get('page_server_address', '0.0.0.0'),
             prefetch_workers=config.get('prefetch_workers', 4),
+            cache_limit_mb=config.get('cache_limit_mb', 0),
             no_semi_sync_iov=config.get('no_semi_sync_iov', False),
             no_async_prefetch=config.get('no_async_prefetch', False),
             no_hot_vma_seed=config.get('no_hot_vma_seed', False),
