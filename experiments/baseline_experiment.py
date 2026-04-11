@@ -220,6 +220,38 @@ def parse_args():
         help='Number of operations, 0=infinite (dataproc)'
     )
 
+    # XGBoost workload
+    parser.add_argument(
+        '--dataset',
+        type=str,
+        default=None,
+        help='XGBoost dataset: synthetic or path to file'
+    )
+    parser.add_argument(
+        '--num-samples',
+        type=int,
+        default=None,
+        help='Number of samples for XGBoost synthetic dataset'
+    )
+    parser.add_argument(
+        '--num-features',
+        type=int,
+        default=None,
+        help='Number of features for XGBoost synthetic dataset'
+    )
+    parser.add_argument(
+        '--num-threads',
+        type=int,
+        default=None,
+        help='Number of XGBoost threads'
+    )
+    parser.add_argument(
+        '--num-rounds',
+        type=int,
+        default=None,
+        help='Number of XGBoost boosting rounds, 0=infinite'
+    )
+
     # ML Training workload
     parser.add_argument(
         '--model-size',
@@ -584,6 +616,18 @@ def build_overrides(args) -> dict:
         overrides['workload.num_cols'] = args.num_cols
     if args.operations is not None:
         overrides['workload.operations'] = args.operations
+
+    # XGBoost workload
+    if args.dataset:
+        overrides['workload.dataset'] = args.dataset
+    if args.num_samples:
+        overrides['workload.num_samples'] = args.num_samples
+    if args.num_features:
+        overrides['workload.num_features'] = args.num_features
+    if args.num_threads:
+        overrides['workload.num_threads'] = args.num_threads
+    if args.num_rounds is not None:
+        overrides['workload.num_rounds'] = args.num_rounds
 
     # ML Training workload
     if args.model_size:
