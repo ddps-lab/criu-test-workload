@@ -184,6 +184,19 @@ systemctl disable redis-server || true
 systemctl stop memcached || true
 systemctl disable memcached || true
 
+# 6.5 Pin kernel to 6.8.x (CRIU requires 6.8 for socket option compatibility)
+echo "[6.5/7] Pinning kernel to 6.8..."
+KERNEL_VER=$(apt-cache search linux-image-6.8 | grep aws | grep -v unsigned | sort -V | tail -1 | awk '{print $1}' | sed 's/linux-image-//')
+if [ -n "$KERNEL_VER" ]; then
+    apt-get install -y "linux-image-${KERNEL_VER}" "linux-modules-${KERNEL_VER}" "linux-modules-extra-${KERNEL_VER}" || true
+    sed -i "s/GRUB_DEFAULT=.*/GRUB_DEFAULT=\"Advanced options for Ubuntu>Ubuntu, with Linux ${KERNEL_VER}\"/" /etc/default/grub
+    update-grub
+    apt-mark hold "linux-image-${KERNEL_VER}"
+    echo "Kernel pinned to ${KERNEL_VER}"
+else
+    echo "WARNING: Could not find 6.8 AWS kernel package"
+fi
+
 # 7. Configure kernel for CRIU
 echo "[7/7] Configuring kernel parameters..."
 tee /etc/sysctl.d/99-criu.conf << EOF
