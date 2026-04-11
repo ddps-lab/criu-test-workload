@@ -53,6 +53,10 @@ mkdir -p "$OUTDIR"
 
 DEST_IP=$(hostname -I | awk '{print $1}')
 
+# Ensure SSH to self works without host key issues
+ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null || true
+ssh-keyscan -H $DEST_IP >> ~/.ssh/known_hosts 2>/dev/null || true
+
 S3_COMMON="--s3-type standard --s3-upload-bucket $S3_BUCKET --s3-region $S3_REGION \
   --s3-download-endpoint $S3_ENDPOINT \
   --s3-access-key $AWS_ACCESS_KEY_ID --s3-secret-key $AWS_SECRET_ACCESS_KEY \
@@ -77,7 +81,8 @@ echo "=========================================="
 # Mode definitions
 # ============================================================
 declare -A MODE_ARGS
-MODE_ARGS[1_baseline]="--lazy-mode none $S3_COMMON"
+# Baseline: handled separately (S3 download + non-lazy restore)
+MODE_ARGS[1_baseline]="BASELINE_SPECIAL"
 MODE_ARGS[2_s3_lazy_only]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-semi-sync-iov --no-async-prefetch --no-hot-vma-seed"
 MODE_ARGS[3_semi_sync]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-async-prefetch --no-hot-vma-seed"
 MODE_ARGS[4_async]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-hot-vma-seed"
@@ -89,24 +94,81 @@ MODE_ORDER=(1_baseline 2_s3_lazy_only 3_semi_sync 4_async 5_full)
 # Cleanup function
 # ============================================================
 cleanup() {
-    sudo pkill -9 memcached 2>/dev/null || true
-    sudo pkill -9 redis-server 2>/dev/null || true
-    sudo pkill -9 java 2>/dev/null || true
-    sudo pkill -9 -f "python3.*standalone" 2>/dev/null || true
-    sudo pkill -9 criu 2>/dev/null || true
-    sudo rm -rf /tmp/criu_checkpoint 2>/dev/null || true
+    # Note: avoid pkill -f patterns that could match this script itself
+    sudo pkill -9 memcached || true
+    sudo pkill -9 redis-server || true
+    sudo pkill -9 -x java || true
+    sudo pkill -9 -x criu || true
+    # Kill standalone workload scripts by exact process name match
+    sudo pgrep -f "python3.*_standalone.py" | xargs -r sudo kill -9 || true
+    sudo rm -rf /tmp/criu_checkpoint || true
     sleep 2
-}
+} 2>/dev/null
 
 # ============================================================
 # Run restore
 # ============================================================
+run_baseline() {
+    local run_num=$1
+    local outfile="$OUTDIR/1_baseline_run${run_num}.json"
+    local logfile="$OUTDIR/1_baseline_run${run_num}.log"
+
+    echo ""
+    echo "--- 1_baseline run $run_num/$REPEAT ($(date +%H:%M:%S)) ---"
+
+    cleanup
+    mkdir -p /tmp/criu_checkpoint/1
+
+    # Step 1: Download checkpoint from S3 to local
+    local start_dl=$(date +%s%3N)
+    aws s3 sync "s3://$S3_BUCKET/$S3_PREFIX/" /tmp/criu_checkpoint/1/ \
+        --region $S3_REGION --quiet
+    local end_dl=$(date +%s%3N)
+    local dl_ms=$((end_dl - start_dl))
+    echo "  S3 download: ${dl_ms}ms"
+
+    # Step 2: Non-lazy restore
+    local start_r=$(date +%s%3N)
+    sudo criu restore \
+        -D /tmp/criu_checkpoint/1 \
+        --shell-job \
+        --tcp-close \
+        -v4 \
+        --log-file /tmp/criu_checkpoint/1/criu-restore.log \
+        2>/dev/null
+    local rc=$?
+    local end_r=$(date +%s%3N)
+    local r_ms=$((end_r - start_r))
+    echo "  Restore: ${r_ms}ms (exit=$rc)"
+
+    # Save results as JSON
+    python3 -c "
+import json
+json.dump({
+    'transfer': {'duration': $dl_ms/1000, 'method': 's3_download'},
+    'restore': {'duration': $r_ms/1000},
+    'mode': '1_baseline',
+    'run': $run_num
+}, open('$outfile', 'w'), indent=2)
+" 2>/dev/null
+
+    # Save logs
+    cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/1_baseline_run${run_num}_restore.log" 2>/dev/null || true
+    echo "  Total: $((dl_ms + r_ms))ms"
+}
+
 run_restore() {
     local mode=$1
     local run_num=$2
     local args="${MODE_ARGS[$mode]}"
     local outfile="$OUTDIR/${mode}_run${run_num}.json"
     local logfile="$OUTDIR/${mode}_run${run_num}.log"
+
+    # Baseline is handled separately
+    if [ "$args" = "BASELINE_SPECIAL" ]; then
+        run_baseline "$run_num"
+        return
+    fi
 
     echo ""
     echo "--- $mode run $run_num/$REPEAT ($(date +%H:%M:%S)) ---"
