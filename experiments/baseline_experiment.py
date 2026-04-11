@@ -813,8 +813,8 @@ def main():
 
             # Collect CRIU-level metrics from lazy-pages and restore logs
             # Wait for lazy-pages daemon to finish (it exits after all pages are served)
-            # Timeout: 300s (enough for 11GB+ workloads on real S3)
-            DAEMON_TIMEOUT = 300
+            # Timeout: 600s (11GB memcached on real S3 can take 400s+)
+            DAEMON_TIMEOUT = 600
             ssh_user = experiment.nodes_config.get('ssh_user', 'ubuntu')
             checkpoint_dir = experiment.final_checkpoint_dir
             lazy_mode = experiment.config.get('checkpoint', {}).get('strategy', {}).get('lazy_mode', 'none')

@@ -624,19 +624,26 @@ class CheckpointManager:
             if log_status == 0:
                 log_content = log_stdout
 
-            error_msg = stderr if stderr else "Unknown error (check CRIU log)"
-            logger.error(f"Restore failed: {error_msg}")
-            if log_content:
-                logger.error(f"CRIU log tail:\n{log_content}")
+            # CRIU may return non-zero due to non-fatal warnings (e.g.,
+            # "restore late stage hook for external plugin failed") even
+            # though restore actually succeeded.  Check log for definitive
+            # success message before treating as failure.
+            if "Restore finished successfully" in log_content:
+                logger.warning(f"CRIU restore exited with status {status} but log says success — treating as success")
+            else:
+                error_msg = stderr if stderr else "Unknown error (check CRIU log)"
+                logger.error(f"Restore failed: {error_msg}")
+                if log_content:
+                    logger.error(f"CRIU log tail:\n{log_content}")
 
-            return {
-                'success': False,
-                'duration': duration,
-                'error': error_msg,
-                'stdout': stdout,
-                'log_file': restore_log_file,
-                'log_content': log_content
-            }
+                return {
+                    'success': False,
+                    'duration': duration,
+                    'error': error_msg,
+                    'stdout': stdout,
+                    'log_file': restore_log_file,
+                    'log_content': log_content
+                }
 
         logger.info(f"Restore completed in {duration:.2f}s")
 
@@ -1317,19 +1324,24 @@ class CheckpointManager:
             if log_status == 0:
                 log_content = log_stdout
 
-            error_msg = stderr if stderr else "Unknown error (check CRIU log)"
-            logger.error(f"S3 restore failed: {error_msg}")
-            if log_content:
-                logger.error(f"CRIU log tail:\n{log_content}")
+            # CRIU may return non-zero due to non-fatal warnings even
+            # though restore actually succeeded.
+            if "Restore finished successfully" in log_content:
+                logger.warning(f"CRIU S3 restore exited with status {status} but log says success — treating as success")
+            else:
+                error_msg = stderr if stderr else "Unknown error (check CRIU log)"
+                logger.error(f"S3 restore failed: {error_msg}")
+                if log_content:
+                    logger.error(f"CRIU log tail:\n{log_content}")
 
-            return {
-                'success': False,
-                'duration': duration,
-                'error': error_msg,
-                'stdout': stdout,
-                'log_file': restore_log_file,
-                'log_content': log_content,
-                's3_config': s3_config.to_dict(),
+                return {
+                    'success': False,
+                    'duration': duration,
+                    'error': error_msg,
+                    'stdout': stdout,
+                    'log_file': restore_log_file,
+                    'log_content': log_content,
+                    's3_config': s3_config.to_dict(),
                 'lazy_config': lazy_config.to_dict()
             }
 
