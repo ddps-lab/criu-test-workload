@@ -97,9 +97,15 @@ MODE_ORDER=(1_baseline 3_semi_sync 4_async 5_full)
 # Cleanup function
 # ============================================================
 cleanup() {
-    # Note: avoid pkill -f patterns that could match this script itself.
-    # Order matters: kill python3 _standalone.py FIRST so it doesn't respawn children.
-    sudo pgrep -f "_standalone.py" 2>/dev/null | xargs -r sudo kill -9 2>/dev/null || true
+    # Kill standalone wrappers FIRST so they don't respawn children.
+    # Use ps+awk and exclude sudo/pgrep/grep/bash to avoid self-killing the
+    # cleanup shell (sudo's own cmdline contains the search pattern).
+    local pids
+    pids=$(ps -eo pid,cmd --no-headers 2>/dev/null \
+        | awk '/python3 .*_standalone\.py/ && !/sudo|pgrep|grep|awk/ {print $1}')
+    if [ -n "$pids" ]; then
+        sudo kill -9 $pids 2>/dev/null || true
+    fi
     sudo pkill -9 memcached 2>/dev/null || true
     sudo pkill -9 redis-server 2>/dev/null || true
     sudo pkill -9 -x java 2>/dev/null || true
