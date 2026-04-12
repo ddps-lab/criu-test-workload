@@ -367,9 +367,17 @@ def monitor_ycsb_run(
                     'elapsed': elapsed,
                     'ycsb_finished': True,
                 }
-            # keep_running: stay alive so redis-server keeps serving (and lazy-pages
-            # daemon can complete fault handling). Mirrors memcached_standalone.py.
-            print(f"[Redis] YCSB done, keeping redis alive")
+            # keep_running: stay alive so redis-server keeps serving. Restart
+            # YCSB so post-restore measurements have an active load generator
+            # (without this, page-fault counts after lazy restore would be
+            # dominated by redis idle behavior, not workload accesses).
+            print(f"[Redis] YCSB done, restarting YCSB and keeping redis alive")
+            try:
+                run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                                          ycsb_threads, target_throughput)
+                print(f"[Redis] YCSB restarted (pid={run_proc.pid})")
+            except Exception as e:
+                print(f"[Redis] YCSB restart failed: {e}")
             while True:
                 time.sleep(5)
 

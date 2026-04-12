@@ -368,8 +368,16 @@ def run_memcached_workload(
                 if not keep_running:
                     print(f"[Memcached] YCSB done, exiting")
                     break
-                # keep_running: stay alive for lazy-pages to complete
-                print(f"[Memcached] YCSB done, keeping memcached alive")
+                # keep_running: stay alive for lazy-pages to complete.
+                # Restart YCSB so post-restore measurements have an active load
+                # generator. See redis_standalone.py for rationale.
+                print(f"[Memcached] YCSB done, restarting YCSB and keeping memcached alive")
+                try:
+                    run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                                              ycsb_threads, target_throughput)
+                    print(f"[Memcached] YCSB restarted (pid={run_proc.pid})")
+                except Exception as e:
+                    print(f"[Memcached] YCSB restart failed: {e}")
                 while True:
                     time.sleep(5)
 
