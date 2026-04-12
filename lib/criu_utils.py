@@ -789,8 +789,14 @@ class CRIUExperiment:
             region = s3_dict.get('region', 'us-west-2')
             endpoint = s3_dict.get('download_endpoint', '')
 
-            # Tar hsperfdata and upload
-            tar_cmd = "cd /tmp && tar czf /tmp/aux_files.tar.gz hsperfdata_* 2>/dev/null || true"
+            # Tar hsperfdata + ycsb props file (in workload working_dir) and upload.
+            # ycsb props file lives at <working_dir>/ycsb_*.properties; if cleanup
+            # deletes it post-restore, the wrapper's restart can't find it.
+            wd = self.config.get('experiment', {}).get('working_dir', '/tmp/criu_checkpoint')
+            tar_cmd = (
+                f"cd /tmp && tar czf /tmp/aux_files.tar.gz "
+                f"hsperfdata_* {wd}/ycsb_*.properties 2>/dev/null || true"
+            )
             source_client.execute(tar_cmd, timeout=10)
 
             # Check if tar was created
