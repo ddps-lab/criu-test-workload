@@ -77,11 +77,18 @@ class TransferManager:
         Returns:
             Transfer metrics
         """
-        # Build rsync command
-        # From source node: rsync to destination
+        # Build rsync command. Disable strict host key checking for both
+        # the outer ssh (caller -> source) and the inner rsync ssh
+        # (source -> dest) so that fresh instances without populated
+        # known_hosts can still transfer.
+        ssh_opts = '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
         rsync_cmd = [
-            'ssh', f'{self.ssh_user}@{source_host}',
-            f'rsync -av --update --inplace --links {checkpoint_dir} {self.ssh_user}@{dest_host}:{self.dest_dir}'
+            'ssh', '-o', 'StrictHostKeyChecking=no',
+            '-o', 'UserKnownHostsFile=/dev/null',
+            f'{self.ssh_user}@{source_host}',
+            f'rsync -av --update --inplace --links '
+            f'-e "ssh {ssh_opts}" '
+            f'{checkpoint_dir} {self.ssh_user}@{dest_host}:{self.dest_dir}'
         ]
 
         logger.info(f"Running rsync: {' '.join(rsync_cmd)}")

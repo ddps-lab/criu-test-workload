@@ -106,22 +106,31 @@ wait_ssh $DST_IP || { echo "dst ssh timeout"; exit 1; }
 
 # Bootstrap SSH key on both sides + cross-host trust (so the framework's
 # paramiko / criu page-server channel can connect from src to dst and back).
+# We aggressively wipe known_hosts and disable strict host key checking via
+# ~/.ssh/config so that any callers (including the framework's rsync over
+# ssh) do not trip on stale host keys baked into the AMI.
 for ip in $SRC_IP $DST_IP; do
     ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$ip "
         cd /opt/criu_workload && git pull origin main -q
+        rm -f ~/.ssh/known_hosts
+        cat > ~/.ssh/config <<'EOF'
+Host *
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    LogLevel ERROR
+EOF
+        chmod 600 ~/.ssh/config
         ssh-keygen -t rsa -N '' -f ~/.ssh/id_rsa -q <<< y >/dev/null 2>&1 || true
         cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
         cp ~/.ssh/id_rsa ~/.ssh/id_ed25519 2>/dev/null || true
     " 2>/dev/null
 done
 
-# Trust src→dst and dst→src using each side's freshly generated keypair.
+# Trust src↔dst using each side's freshly generated keypair.
 SRC_PUB=$(ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$SRC_IP "cat ~/.ssh/id_rsa.pub")
 DST_PUB=$(ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$DST_IP "cat ~/.ssh/id_rsa.pub")
 ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$DST_IP "echo '$SRC_PUB' >> ~/.ssh/authorized_keys"
 ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$SRC_IP "echo '$DST_PUB' >> ~/.ssh/authorized_keys"
-ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$SRC_IP "ssh-keyscan -H $DST_PRIV >> ~/.ssh/known_hosts 2>/dev/null"
-ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$DST_IP "ssh-keyscan -H $SRC_PRIV >> ~/.ssh/known_hosts 2>/dev/null"
 
 # Driver runs on the SOURCE instance via baseline_experiment.py with
 # --lazy-mode live-migration. The framework handles starting page-server on
