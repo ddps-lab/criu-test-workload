@@ -23,19 +23,25 @@ S3_BUCKET="mhsong-criu-checkpoints"
 S3_RESULTS_BUCKET="mhsong-criu-results"
 S3_REGION="us-west-2"
 S3_ENDPOINT="https://s3.us-west-2.amazonaws.com"
+S3_TYPE="standard"           # standard | express-one-zone | cloudfront
+RESULTS_SUFFIX=""            # tag appended to results timestamp dir
 AUTO_TERMINATE=0
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --workload)       WORKLOAD="$2"; shift 2 ;;
-        --s3-prefix)      S3_PREFIX="$2"; shift 2 ;;
-        --repeat)         REPEAT="$2"; shift 2 ;;
-        --mode)           MODE="$2"; shift 2 ;;
-        --extra-args)     EXTRA_ARGS="$2"; shift 2 ;;
-        --s3-bucket)      S3_BUCKET="$2"; shift 2 ;;
-        --s3-results)     S3_RESULTS_BUCKET="$2"; shift 2 ;;
-        --auto-terminate) AUTO_TERMINATE=1; shift ;;
-        *)                echo "Unknown: $1"; exit 1 ;;
+        --workload)             WORKLOAD="$2"; shift 2 ;;
+        --s3-prefix)            S3_PREFIX="$2"; shift 2 ;;
+        --repeat)               REPEAT="$2"; shift 2 ;;
+        --mode)                 MODE="$2"; shift 2 ;;
+        --extra-args)           EXTRA_ARGS="$2"; shift 2 ;;
+        --s3-bucket)            S3_BUCKET="$2"; shift 2 ;;
+        --s3-region)            S3_REGION="$2"; shift 2 ;;
+        --s3-endpoint)          S3_ENDPOINT="$2"; shift 2 ;;
+        --s3-type)              S3_TYPE="$2"; shift 2 ;;
+        --s3-results)           S3_RESULTS_BUCKET="$2"; shift 2 ;;
+        --s3-results-suffix)    RESULTS_SUFFIX="$2"; shift 2 ;;
+        --auto-terminate)       AUTO_TERMINATE=1; shift ;;
+        *)                      echo "Unknown: $1"; exit 1 ;;
     esac
 done
 
@@ -50,7 +56,12 @@ if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
     exit 1
 fi
 
-OUTDIR="/tmp/results/${S3_PREFIX}_$(date +%Y%m%d_%H%M%S)"
+_TS=$(date +%Y%m%d_%H%M%S)
+if [ -n "$RESULTS_SUFFIX" ]; then
+    OUTDIR="/tmp/results/${S3_PREFIX}_${RESULTS_SUFFIX}_${_TS}"
+else
+    OUTDIR="/tmp/results/${S3_PREFIX}_${_TS}"
+fi
 mkdir -p "$OUTDIR"
 
 DEST_IP=$(hostname -I | awk '{print $1}')
@@ -59,7 +70,7 @@ DEST_IP=$(hostname -I | awk '{print $1}')
 ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null || true
 ssh-keyscan -H $DEST_IP >> ~/.ssh/known_hosts 2>/dev/null || true
 
-S3_COMMON="--s3-type standard --s3-upload-bucket $S3_BUCKET --s3-region $S3_REGION \
+S3_COMMON="--s3-type $S3_TYPE --s3-upload-bucket $S3_BUCKET --s3-region $S3_REGION \
   --s3-download-endpoint $S3_ENDPOINT \
   --s3-access-key $AWS_ACCESS_KEY_ID --s3-secret-key $AWS_SECRET_ACCESS_KEY \
   --s3-prefix $S3_PREFIX"
@@ -221,18 +232,52 @@ run_restore() {
 }
 
 # ============================================================
-# S3 cache warmup
+# Backend-aware cache warmup
 # ============================================================
 echo ""
 echo "=========================================="
-echo " S3 Cache Warmup (5 rounds)"
+echo " Cache Warmup (5 rounds, backend=$S3_TYPE)"
 echo "=========================================="
-for i in $(seq 1 5); do
-    mkdir -p /tmp/s3_warmup
-    aws s3 sync "s3://$S3_BUCKET/$S3_PREFIX/" /tmp/s3_warmup/ --region $S3_REGION --quiet
-    rm -rf /tmp/s3_warmup
-    echo "  warmup $i/5 done"
-done
+mkdir -p /tmp/s3_warmup
+case "$S3_TYPE" in
+    standard)
+        for i in $(seq 1 5); do
+            aws s3 sync "s3://$S3_BUCKET/$S3_PREFIX/" /tmp/s3_warmup/ \
+                --region "$S3_REGION" --quiet
+            rm -rf /tmp/s3_warmup/* 2>/dev/null
+            echo "  warmup $i/5 done"
+        done
+        ;;
+    express-one-zone)
+        # Express directory bucket: pin warmup to its zone-local endpoint so
+        # the cache that gets primed is the one CRIU will hit during restore.
+        for i in $(seq 1 5); do
+            aws s3 sync "s3://$S3_BUCKET/$S3_PREFIX/" /tmp/s3_warmup/ \
+                --region "$S3_REGION" --endpoint-url "$S3_ENDPOINT" --quiet
+            rm -rf /tmp/s3_warmup/* 2>/dev/null
+            echo "  warmup $i/5 done"
+        done
+        ;;
+    cloudfront)
+        # CloudFront sits in front of the origin S3 bucket. We list keys via
+        # the AWS SDK (cheap, server-side) and then GET each object through
+        # the distribution to populate the edge cache. The CloudFront origin
+        # is configured to point at $CF_ORIGIN_BUCKET in $CF_ORIGIN_REGION.
+        : "${CF_ORIGIN_BUCKET:=mhsong-criu-checkpoints}"
+        : "${CF_ORIGIN_REGION:=us-west-2}"
+        KEYS=$(aws s3 ls "s3://$CF_ORIGIN_BUCKET/$S3_PREFIX/" \
+                  --region "$CF_ORIGIN_REGION" --recursive | awk '{print $NF}')
+        for i in $(seq 1 5); do
+            for key in $KEYS; do
+                curl -fsS -o /dev/null "$S3_ENDPOINT/$key" || true
+            done
+            echo "  warmup $i/5 done"
+        done
+        ;;
+    *)
+        echo "Unknown S3_TYPE: $S3_TYPE"; exit 1 ;;
+esac
+rm -rf /tmp/s3_warmup
 echo "Warmup complete."
 
 # ============================================================
