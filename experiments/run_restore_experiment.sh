@@ -135,11 +135,15 @@ run_baseline() {
         sudo tar xzf /tmp/criu_checkpoint/1/aux_files.tar.gz -C / 2>/dev/null || true
     fi
 
-    # Step 2: Non-lazy restore
-    # No --restore-detached: criu blocks until restoration is fully complete,
-    # so the measured elapsed time reflects the actual restore work. We use
-    # --tcp-established for redis/memcached and --tcp-close otherwise.
-    local TCP_FLAGS="--tcp-close"
+    # Step 2: Non-lazy restore.
+    # --restore-detached: criu forks the root and exits as soon as
+    # "Restore finished successfully. Tasks resumed." is reached. Without
+    # this, criu blocks waiting for the restored daemon to exit, which
+    # never happens for long-running workloads. The criu binary's elapsed
+    # time therefore equals the actual restore-completion time.
+    # TCP flags only for workloads that have TCP state (redis/memcached);
+    # other workloads have no TCP sockets in their dump.
+    local TCP_FLAGS=""
     case "$WORKLOAD" in
         redis|memcached) TCP_FLAGS="--tcp-established" ;;
     esac
@@ -148,6 +152,7 @@ run_baseline() {
     sudo criu restore \
         -D /tmp/criu_checkpoint/1 \
         --shell-job \
+        --restore-detached \
         $TCP_FLAGS \
         -v4 \
         --log-file /tmp/criu_checkpoint/1/criu-restore.log \
