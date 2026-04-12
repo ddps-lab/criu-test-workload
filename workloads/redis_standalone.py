@@ -350,7 +350,8 @@ def monitor_ycsb_run(
                 if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
                     print(f"[Redis] YCSB: {line.strip()}")
             print(f"[Redis] YCSB run phase finished (exit={run_proc.returncode})")
-            if keep_running:
+            if not keep_running:
+                print(f"[Redis] YCSB done, exiting")
                 elapsed = time.time() - start_time
                 return {
                     'restored': False,
@@ -358,7 +359,11 @@ def monitor_ycsb_run(
                     'elapsed': elapsed,
                     'ycsb_finished': True,
                 }
-            # Keep waiting for checkpoint_flag removal
+            # keep_running: stay alive so redis-server keeps serving (and lazy-pages
+            # daemon can complete fault handling). Mirrors memcached_standalone.py.
+            print(f"[Redis] YCSB done, keeping redis alive")
+            while True:
+                time.sleep(5)
 
         current_time = time.time()
         if current_time - last_report_time >= 5.0:
