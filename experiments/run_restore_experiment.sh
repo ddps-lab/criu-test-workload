@@ -132,7 +132,7 @@ run_baseline() {
 
     # Step 1b: Extract aux_files.tar.gz (hsperfdata) so Java can find its perf files
     if [ -f /tmp/criu_checkpoint/1/aux_files.tar.gz ]; then
-        sudo tar xzf /tmp/criu_checkpoint/1/aux_files.tar.gz -C /tmp/ 2>/dev/null || true
+        sudo tar xzf /tmp/criu_checkpoint/1/aux_files.tar.gz -C / 2>/dev/null || true
     fi
 
     # Step 2: Non-lazy restore

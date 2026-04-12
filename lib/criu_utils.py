@@ -790,12 +790,14 @@ class CRIUExperiment:
             endpoint = s3_dict.get('download_endpoint', '')
 
             # Tar hsperfdata + ycsb props file (in workload working_dir) and upload.
-            # ycsb props file lives at <working_dir>/ycsb_*.properties; if cleanup
-            # deletes it post-restore, the wrapper's restart can't find it.
+            # Use absolute paths consistently so the archive is extracted to /
+            # without prefix mismatch. ycsb props file lives at
+            # <working_dir>/ycsb_*.properties; if cleanup deletes it post-restore,
+            # the wrapper's restart can't find it.
             wd = self.config.get('experiment', {}).get('working_dir', '/tmp/criu_checkpoint')
             tar_cmd = (
-                f"cd /tmp && tar czf /tmp/aux_files.tar.gz "
-                f"hsperfdata_* {wd}/ycsb_*.properties 2>/dev/null || true"
+                f"tar czf /tmp/aux_files.tar.gz "
+                f"/tmp/hsperfdata_* {wd}/ycsb_*.properties 2>/dev/null || true"
             )
             source_client.execute(tar_cmd, timeout=10)
 
@@ -833,7 +835,7 @@ class CRIUExperiment:
                 logger.debug("No aux_files.tar.gz in S3, skipping")
                 return
 
-            dest_client.execute("cd /tmp && tar xzf aux_files.tar.gz 2>/dev/null || true", timeout=10)
+            dest_client.execute("sudo tar xzf /tmp/aux_files.tar.gz -C / 2>/dev/null || true", timeout=10)
             logger.info("Downloaded and extracted auxiliary files from S3")
         except Exception as e:
             logger.warning(f"Failed to download aux files from S3: {e}")
