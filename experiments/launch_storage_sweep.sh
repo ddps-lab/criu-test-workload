@@ -69,7 +69,13 @@ case "$BACKEND" in
         S3_TYPE="express-one-zone"
         S3_BUCKET="${EXPRESS_BUCKET:-mhsong-criu-express--usw2-az1--x-s3}"
         S3_REGION="${EXPRESS_REGION:-us-west-2}"
-        S3_ENDPOINT="${EXPRESS_ENDPOINT:-https://s3express-usw2-az1.us-west-2.amazonaws.com}"
+        # NOTE: criu-s3 has a bug where the express-one-zone code path passes
+        # opts.object_storage_endpoint_url verbatim instead of the protocol-
+        # stripped `hostname`, producing URLs like
+        # "https://bucket.https://endpoint/?session". Pass the endpoint
+        # WITHOUT https:// here so the prepended protocol is well-formed.
+        # See criu-s3 object-storage.c:925, 1175, 1207.
+        S3_ENDPOINT="${EXPRESS_ENDPOINT:-s3express-usw2-az1.us-west-2.amazonaws.com}"
         ;;
     cloudfront)
         S3_TYPE="cloudfront"
