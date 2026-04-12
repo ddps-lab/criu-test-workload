@@ -311,7 +311,11 @@ echo "=========================================="
 echo " Uploading results to S3"
 echo "=========================================="
 
-RESULTS_PREFIX="${S3_PREFIX}/$(date +%Y%m%d_%H%M%S)"
+if [ -n "$RESULTS_SUFFIX" ]; then
+    RESULTS_PREFIX="${S3_PREFIX}_${RESULTS_SUFFIX}/$(date +%Y%m%d_%H%M%S)"
+else
+    RESULTS_PREFIX="${S3_PREFIX}/$(date +%Y%m%d_%H%M%S)"
+fi
 aws s3 sync "$OUTDIR" "s3://$S3_RESULTS_BUCKET/$RESULTS_PREFIX/" \
     --region $S3_REGION --quiet
 echo "Results uploaded to s3://$S3_RESULTS_BUCKET/$RESULTS_PREFIX/"
