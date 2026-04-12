@@ -197,6 +197,16 @@ else
     echo "WARNING: Could not find 6.8 AWS kernel package"
 fi
 
+# 6.6 Switch iptables to legacy backend.
+# CRIU's TCP restore path uses iptables for connection locking, and the
+# nft backend on Ubuntu 24.04 silently fails some operations leading to
+# half-restored TCP state (especially for redis-server). Legacy backend
+# is the proven path for CRIU.
+echo "[6.6/7] Switching iptables to legacy..."
+update-alternatives --set iptables /usr/sbin/iptables-legacy || true
+update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
+iptables -V
+
 # 7. Configure kernel for CRIU
 echo "[7/7] Configuring kernel parameters..."
 tee /etc/sysctl.d/99-criu.conf << EOF
