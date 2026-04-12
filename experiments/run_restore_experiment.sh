@@ -136,14 +136,19 @@ run_baseline() {
     fi
 
     # Step 2: Non-lazy restore
-    # --restore-detached: criu returns immediately after restore (don't block on process)
-    # --tcp-established: restore TCP connections (needed for YCSB/Redis/Memcached)
+    # No --restore-detached: criu blocks until restoration is fully complete,
+    # so the measured elapsed time reflects the actual restore work. We use
+    # --tcp-established for redis/memcached and --tcp-close otherwise.
+    local TCP_FLAGS="--tcp-close"
+    case "$WORKLOAD" in
+        redis|memcached) TCP_FLAGS="--tcp-established" ;;
+    esac
+
     local start_r=$(date +%s%3N)
     sudo criu restore \
         -D /tmp/criu_checkpoint/1 \
         --shell-job \
-        --restore-detached \
-        --tcp-established \
+        $TCP_FLAGS \
         -v4 \
         --log-file /tmp/criu_checkpoint/1/criu-restore.log \
         2>/dev/null
