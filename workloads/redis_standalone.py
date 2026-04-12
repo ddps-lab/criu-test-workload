@@ -617,7 +617,47 @@ def run_redis_workload(
         print(f"[Redis] ===================================")
         print(f"[Redis]")
 
-        # YCSB run phase + monitor for restore
+        # IMPORTANT: do not start YCSB run phase before dump.
+        # If java is alive at dump time, the JVM races with CRIU's freeze
+        # (DependencyContext / GC / glibc malloc) and causes thread crashes.
+        # Instead we wait here with NO java/ycsb running. CRIU dumps the
+        # wrapper + redis-server tree only. After restore (checkpoint_flag
+        # removed by the framework), we start YCSB run phase fresh.
+        print(f"[Redis] YCSB load done. Sleeping until restore (no YCSB running).")
+        while not check_restore_complete(working_dir):
+            time.sleep(1)
+        print(f"[Redis] Restore detected at {time.time():.0f}, starting YCSB run phase")
+        run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                                  ycsb_threads, target_throughput)
+        print(f"[Redis] YCSB run started (pid={run_proc.pid})")
+        # Stay alive forever; the run process drives load while we sleep.
+        try:
+            while True:
+                time.sleep(5)
+                if run_proc.poll() is not None:
+                    # YCSB exited (e.g., wall-clock duration); spawn another
+                    # so the load generator stays active for measurement.
+                    run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                                              ycsb_threads, target_throughput)
+                    print(f"[Redis] YCSB respawned (pid={run_proc.pid})")
+        except KeyboardInterrupt:
+            print(f"[Redis] Interrupted")
+        finally:
+            try: run_proc.terminate()
+            except Exception: pass
+            try:
+                if client:
+                    client.shutdown(nosave=True)
+            except Exception:
+                pass
+            redis_process.terminate()
+            try:
+                redis_process.wait(timeout=5)
+            except Exception:
+                redis_process.kill()
+        return  # don't fall through to legacy code
+
+        # ---- legacy path (kept below but unreachable) ----
         try:
             result = monitor_ycsb_run(
                 ycsb_home, props_path, ycsb_threads,

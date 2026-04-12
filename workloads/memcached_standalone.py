@@ -315,7 +315,40 @@ def run_memcached_workload(
     print(f"[Memcached] ===================================")
     print(f"[Memcached]")
 
-    # YCSB run phase
+    # IMPORTANT: do not start YCSB run phase before dump.
+    # If java is alive at dump time, the JVM races with CRIU's freeze
+    # (DependencyContext / GC / glibc malloc) and causes thread crashes.
+    # Instead we wait here with NO java/ycsb running. CRIU dumps the
+    # wrapper + memcached tree only. After restore (checkpoint_flag
+    # removed by the framework), we start YCSB run phase fresh.
+    print(f"[Memcached] YCSB load done. Sleeping until restore (no YCSB running).")
+    while not check_restore_complete(working_dir):
+        time.sleep(1)
+    print(f"[Memcached] Restore detected at {time.time():.0f}, starting YCSB run phase")
+    run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                              ycsb_threads, target_throughput)
+    print(f"[Memcached] YCSB run started (pid={run_proc.pid})")
+    try:
+        while True:
+            time.sleep(5)
+            if run_proc.poll() is not None:
+                run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                                          ycsb_threads, target_throughput)
+                print(f"[Memcached] YCSB respawned (pid={run_proc.pid})")
+    except KeyboardInterrupt:
+        print(f"[Memcached] Interrupted")
+    finally:
+        try: run_proc.terminate()
+        except Exception: pass
+        try:
+            mc_process.terminate()
+            mc_process.wait(timeout=5)
+        except Exception:
+            try: mc_process.kill()
+            except Exception: pass
+    return  # don't fall through to legacy code
+
+    # ---- legacy unreachable ----
     print(f"[Memcached] Starting YCSB run phase...")
     run_proc = run_ycsb_phase(ycsb_home, 'run', props_path, ycsb_threads, target_throughput)
 
