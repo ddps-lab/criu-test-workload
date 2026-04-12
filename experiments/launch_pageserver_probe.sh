@@ -123,6 +123,16 @@ EOF
         ssh-keygen -t rsa -N '' -f ~/.ssh/id_rsa -q <<< y >/dev/null 2>&1 || true
         cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
         cp ~/.ssh/id_rsa ~/.ssh/id_ed25519 2>/dev/null || true
+
+        # baseline_experiment.py runs as root via sudo and ssh's to
+        # ubuntu@127.0.0.1 / ubuntu@<dest>. Root needs its own copy of the
+        # ubuntu private key + permissive ssh config.
+        sudo mkdir -p /root/.ssh
+        sudo cp ~/.ssh/id_rsa /root/.ssh/id_rsa
+        sudo cp ~/.ssh/id_rsa.pub /root/.ssh/id_rsa.pub
+        sudo cp ~/.ssh/config /root/.ssh/config
+        sudo chmod 600 /root/.ssh/id_rsa /root/.ssh/config
+        sudo chown -R root:root /root/.ssh
     " 2>/dev/null
 done
 
@@ -157,7 +167,7 @@ echo "=== [\$(date +%H:%M:%S)] page-server probe: \$WORKLOAD ==="
 # matches the standard restore experiment so the workload state is comparable.
 sudo -E python3 -u experiments/baseline_experiment.py \\
     --config config/experiments/memcached_lazy_prefetch.yaml \\
-    --source-ip 127.0.0.1 --dest-ip $DST_PRIV \\
+    --source-ip $SRC_PRIV --dest-ip $DST_PRIV \\
     --ssh-user ubuntu --workload \$WORKLOAD \\
     --lazy-mode live-migration \\
     --wait-before-dump 120 --duration 86400 \\
