@@ -244,10 +244,18 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
 
     print(f"[Redis] YCSB {phase}: {' '.join(cmd)}")
 
+    # JAVA_OPTS=-Xint disables JIT compilation. JIT's class dependency tracking
+    # races with CRIU's process freeze, causing JVM crash at dump time
+    # (DependencyContext::mark_dependent_nmethods SIGSEGV → glibc malloc
+    # double-fault → SIGABRT). Interpreter mode avoids this entirely at the
+    # cost of YCSB throughput, which is irrelevant for our restore measurements.
+    env = os.environ.copy()
+    env['JAVA_OPTS'] = (env.get('JAVA_OPTS', '') + ' -Xint').strip()
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
     )
     return process
 

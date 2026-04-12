@@ -201,10 +201,16 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
 
     print(f"[Memcached] YCSB {phase}: {' '.join(cmd)}")
 
+    # JAVA_OPTS=-Xint disables JIT compilation. JIT's class dependency tracking
+    # races with CRIU's process freeze, causing JVM crash at dump time. See
+    # redis_standalone.py for the full backtrace analysis.
+    env = os.environ.copy()
+    env['JAVA_OPTS'] = (env.get('JAVA_OPTS', '') + ' -Xint').strip()
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
     )
     return process
 
