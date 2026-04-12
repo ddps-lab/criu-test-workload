@@ -374,8 +374,22 @@ def monitor_ycsb_run(
             with open('/tmp/redis_wrapper.log', 'a') as _lf:
                 _lf.write(f"[{time.time():.3f}] YCSB done, restarting YCSB\n")
                 try:
-                    run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                                              ycsb_threads, target_throughput)
+                    # Write new YCSB stdout/stderr to a log so we can debug
+                    # any restart-time failure (the original Popen used
+                    # DEVNULL which silently swallows errors).
+                    _ycsb_log = open('/tmp/redis_ycsb_restart.log', 'a')
+                    ycsb_bin = get_ycsb_bin(ycsb_home)
+                    _cmd = [
+                        ycsb_bin, 'run', 'redis', '-s',
+                        '-jvm-args=-Xint',
+                        '-P', props_path,
+                        '-threads', str(ycsb_threads),
+                    ]
+                    if target_throughput > 0:
+                        _cmd.extend(['-target', str(target_throughput)])
+                    run_proc = subprocess.Popen(
+                        _cmd, stdout=_ycsb_log, stderr=subprocess.STDOUT,
+                    )
                     _lf.write(f"[{time.time():.3f}] YCSB restarted pid={run_proc.pid}\n")
                 except Exception as e:
                     import traceback
