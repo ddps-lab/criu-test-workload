@@ -131,11 +131,14 @@ run_baseline() {
     echo "  S3 download: ${dl_ms}ms"
 
     # Step 2: Non-lazy restore
+    # --restore-detached: criu returns immediately after restore (don't block on process)
+    # --tcp-established: restore TCP connections (needed for YCSB/Redis/Memcached)
     local start_r=$(date +%s%3N)
     sudo criu restore \
         -D /tmp/criu_checkpoint/1 \
         --shell-job \
-        --tcp-close \
+        --restore-detached \
+        --tcp-established \
         -v4 \
         --log-file /tmp/criu_checkpoint/1/criu-restore.log \
         2>/dev/null
