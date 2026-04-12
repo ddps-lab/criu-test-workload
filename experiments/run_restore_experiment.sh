@@ -249,11 +249,11 @@ case "$S3_TYPE" in
         done
         ;;
     express-one-zone)
-        # Express directory bucket: pin warmup to its zone-local endpoint so
-        # the cache that gets primed is the one CRIU will hit during restore.
+        # Express directory buckets do NOT support `s3 sync`. Use cp --recursive
+        # which goes through the same backend cache path as the experiment will.
         for i in $(seq 1 5); do
-            aws s3 sync "s3://$S3_BUCKET/$S3_PREFIX/" /tmp/s3_warmup/ \
-                --region "$S3_REGION" --endpoint-url "$S3_ENDPOINT" --quiet
+            aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/" /tmp/s3_warmup/ \
+                --recursive --region "$S3_REGION" --endpoint-url "$S3_ENDPOINT" --quiet
             rm -rf /tmp/s3_warmup/* 2>/dev/null
             echo "  warmup $i/5 done"
         done
