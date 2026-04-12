@@ -97,16 +97,16 @@ MODE_ORDER=(1_baseline 3_semi_sync 4_async 5_full)
 # Cleanup function
 # ============================================================
 cleanup() {
-    # Note: avoid pkill -f patterns that could match this script itself
-    sudo pkill -9 memcached || true
-    sudo pkill -9 redis-server || true
-    sudo pkill -9 -x java || true
-    sudo pkill -9 -x criu || true
-    # Kill standalone workload scripts by exact process name match
-    sudo pgrep -f "python3.*_standalone.py" | xargs -r sudo kill -9 || true
-    sudo rm -rf /tmp/criu_checkpoint || true
-    sleep 2
-} 2>/dev/null
+    # Note: avoid pkill -f patterns that could match this script itself.
+    # Order matters: kill python3 _standalone.py FIRST so it doesn't respawn children.
+    sudo pgrep -f "_standalone.py" 2>/dev/null | xargs -r sudo kill -9 2>/dev/null || true
+    sudo pkill -9 memcached 2>/dev/null || true
+    sudo pkill -9 redis-server 2>/dev/null || true
+    sudo pkill -9 -x java 2>/dev/null || true
+    sudo pkill -9 -x criu 2>/dev/null || true
+    sudo rm -rf /tmp/criu_checkpoint /tmp/hsperfdata_ubuntu /tmp/hsperfdata_root 2>/dev/null || true
+    sleep 3
+}
 
 # ============================================================
 # Run restore
@@ -129,6 +129,11 @@ run_baseline() {
     local end_dl=$(date +%s%3N)
     local dl_ms=$((end_dl - start_dl))
     echo "  S3 download: ${dl_ms}ms"
+
+    # Step 1b: Extract aux_files.tar.gz (hsperfdata) so Java can find its perf files
+    if [ -f /tmp/criu_checkpoint/1/aux_files.tar.gz ]; then
+        sudo tar xzf /tmp/criu_checkpoint/1/aux_files.tar.gz -C /tmp/ 2>/dev/null || true
+    fi
 
     # Step 2: Non-lazy restore
     # --restore-detached: criu returns immediately after restore (don't block on process)
