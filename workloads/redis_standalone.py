@@ -371,13 +371,16 @@ def monitor_ycsb_run(
             # YCSB so post-restore measurements have an active load generator
             # (without this, page-fault counts after lazy restore would be
             # dominated by redis idle behavior, not workload accesses).
-            print(f"[Redis] YCSB done, restarting YCSB and keeping redis alive")
-            try:
-                run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                                          ycsb_threads, target_throughput)
-                print(f"[Redis] YCSB restarted (pid={run_proc.pid})")
-            except Exception as e:
-                print(f"[Redis] YCSB restart failed: {e}")
+            with open('/tmp/redis_wrapper.log', 'a') as _lf:
+                _lf.write(f"[{time.time():.3f}] YCSB done, restarting YCSB\n")
+                try:
+                    run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                                              ycsb_threads, target_throughput)
+                    _lf.write(f"[{time.time():.3f}] YCSB restarted pid={run_proc.pid}\n")
+                except Exception as e:
+                    import traceback
+                    _lf.write(f"[{time.time():.3f}] YCSB restart FAILED: {e}\n{traceback.format_exc()}\n")
+                _lf.flush()
             while True:
                 time.sleep(5)
 

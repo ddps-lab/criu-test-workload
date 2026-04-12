@@ -342,12 +342,13 @@ def main():
         help='Working directory for signal files'
     )
     parser.add_argument(
-        '--keep-running',
+        '--stop-on-restore',
         action='store_true',
-        help='Keep running after restore (ignore checkpoint_flag removal)'
+        help='Stop when restore is detected (checkpoint_flag removed). Default: keep running.'
     )
 
     args = parser.parse_args()
+    args.keep_running = not args.stop_on_restore
 
     run_sevenzip_workload(
         compression_level=args.compression_level,

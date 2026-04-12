@@ -303,12 +303,13 @@ def main():
         help='Override dataset size (default: depends on model-size)'
     )
     parser.add_argument(
-        '--keep-running',
+        '--stop-on-restore',
         action='store_true',
-        help='Keep running after restore (ignore checkpoint_flag removal)'
+        help='Stop when restore is detected (checkpoint_flag removed). Default: keep running.'
     )
 
     args = parser.parse_args()
+    args.keep_running = not args.stop_on_restore
 
     run_ml_training_workload(
         model_size=args.model_size,
