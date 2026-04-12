@@ -191,8 +191,11 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
                    ycsb_threads: int, target_throughput: int) -> subprocess.Popen:
     """Run a YCSB phase (load or run) against memcached."""
     ycsb_bin = get_ycsb_bin(ycsb_home)
+    # -jvm-args=-Xint disables JIT (see redis_standalone.py for full rationale).
+    # YCSB's bin/ycsb script doesn't honor JAVA_OPTS env; must use -jvm-args.
     cmd = [
         ycsb_bin, phase, 'memcached', '-s',
+        '-jvm-args=-Xint',
         '-P', props_path,
         '-threads', str(ycsb_threads),
     ]
@@ -201,16 +204,10 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
 
     print(f"[Memcached] YCSB {phase}: {' '.join(cmd)}")
 
-    # JAVA_OPTS=-Xint disables JIT compilation. JIT's class dependency tracking
-    # races with CRIU's process freeze, causing JVM crash at dump time. See
-    # redis_standalone.py for the full backtrace analysis.
-    env = os.environ.copy()
-    env['JAVA_OPTS'] = (env.get('JAVA_OPTS', '') + ' -Xint').strip()
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        env=env,
     )
     return process
 
