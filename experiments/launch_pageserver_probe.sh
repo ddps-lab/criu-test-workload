@@ -133,22 +133,43 @@ set +e
 export AWS_ACCESS_KEY_ID='${AWS_KEY}'
 export AWS_SECRET_ACCESS_KEY='${AWS_SECRET}'
 cd /opt/criu_workload
-echo "=== [\$(date +%H:%M:%S)] page-server probe: $WORKLOAD ==="
+
+KEEP_INSTANCE=${KEEP_INSTANCE}
+WORKLOAD="${WORKLOAD}"
+SRC_ID="${SRC_ID}"
+DST_ID="${DST_ID}"
+TS=\$(date +%Y%m%d_%H%M%S)
+OUTDIR=/tmp/results/pageserver_\${WORKLOAD}_\${TS}
+mkdir -p \$OUTDIR
+
+echo "=== [\$(date +%H:%M:%S)] page-server probe: \$WORKLOAD ==="
 
 # duration=86400 keeps YCSB run alive past wall-clock; wait_before_dump=120
 # matches the standard restore experiment so the workload state is comparable.
 sudo -E python3 -u experiments/baseline_experiment.py \\
     --config config/experiments/memcached_lazy_prefetch.yaml \\
     --source-ip 127.0.0.1 --dest-ip $DST_PRIV \\
-    --ssh-user ubuntu --workload $WORKLOAD \\
+    --ssh-user ubuntu --workload \$WORKLOAD \\
     --lazy-mode live-migration \\
     --wait-before-dump 120 --duration 86400 \\
     $EXTRA_ARGS \\
-    -o /tmp/pageserver_${WORKLOAD}.json
-echo "exit=\$?"
+    -o \$OUTDIR/pageserver.json \\
+    > \$OUTDIR/baseline_experiment.log 2>&1
+RC=\$?
+echo "baseline_experiment exit=\$RC"
+
+# Pull CRIU artefacts that the framework leaves behind on each side.
+mkdir -p \$OUTDIR/source_logs \$OUTDIR/dest_logs
+sudo cp /tmp/criu_checkpoint/1/criu-page-server.log \$OUTDIR/source_logs/ 2>/dev/null || true
+sudo cp /tmp/criu_checkpoint/1/criu-dump.log         \$OUTDIR/source_logs/ 2>/dev/null || true
+scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \\
+    ubuntu@$DST_PRIV:/tmp/criu_checkpoint/1/criu-restore.log    \$OUTDIR/dest_logs/ 2>/dev/null || true
+scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \\
+    ubuntu@$DST_PRIV:/tmp/criu_checkpoint/1/criu-lazy-pages.log \$OUTDIR/dest_logs/ 2>/dev/null || true
+sudo chown -R ubuntu:ubuntu \$OUTDIR
 
 echo "=== framework metrics ==="
-cat /tmp/pageserver_${WORKLOAD}.json 2>/dev/null | python3 -c "
+cat \$OUTDIR/pageserver.json 2>/dev/null | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -162,6 +183,18 @@ try:
 except Exception as e:
     print(f'parse error: {e}')
 "
+
+# Upload all artefacts to S3.
+S3_DEST="s3://mhsong-criu-results/pageserver_\${WORKLOAD}/\${TS}/"
+aws s3 sync \$OUTDIR \$S3_DEST --region us-west-2 --quiet
+echo "uploaded → \$S3_DEST"
+
+# Auto-terminate both instances unless explicitly told to keep.
+if [ "\$KEEP_INSTANCE" = "0" ]; then
+    echo "Auto-terminating src=\$SRC_ID dst=\$DST_ID"
+    aws ec2 terminate-instances --region us-west-2 \\
+        --instance-ids \$SRC_ID \$DST_ID 2>&1 | tail -5
+fi
 DRIVER
 
 ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$SRC_IP "
@@ -179,6 +212,7 @@ echo "  src: ssh -i $SSH_KEY ubuntu@$SRC_IP 'tail -f /tmp/probe.log'"
 echo "  dst: ssh -i $SSH_KEY ubuntu@$DST_IP 'tail -f /tmp/criu_checkpoint/1/criu-lazy-pages.log'"
 echo
 if [ "$KEEP_INSTANCE" -eq 0 ]; then
-    echo "Instances will NOT auto-terminate. Run:"
-    echo "  aws ec2 terminate-instances --region $REGION --instance-ids $SRC_ID $DST_ID"
+    echo "Instances will auto-terminate after S3 upload."
+else
+    echo "--keep-instance set: src=$SRC_ID dst=$DST_ID will remain."
 fi
