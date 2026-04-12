@@ -234,16 +234,8 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
     setsid — it is a load generator, NOT a checkpoint target.
     """
     ycsb_bin = get_ycsb_bin(ycsb_home)
-    # -jvm-args=-Xint disables JIT compilation. JIT's class dependency tracking
-    # races with CRIU's process freeze, causing JVM crash at dump time
-    # (DependencyContext::mark_dependent_nmethods SIGSEGV → glibc malloc
-    # double-fault → SIGABRT). Interpreter mode avoids this entirely at the
-    # cost of YCSB throughput, which is irrelevant for our restore measurements.
-    # Note: YCSB's bin/ycsb script doesn't honor JAVA_OPTS env; must use
-    # -jvm-args on the YCSB command line.
     cmd = [
         ycsb_bin, phase, 'redis', '-s',
-        '-jvm-args=-Xint',
         '-P', props_path,
         '-threads', str(ycsb_threads),
     ]
