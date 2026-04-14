@@ -65,7 +65,7 @@ class RemoteDirtyTracker:
         base_path = '/opt/criu_workload'
         tracker_path = f"{base_path}/{self.TRACKER_PATHS[tracker_type]}"
 
-        cmd = f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} 'test -x {tracker_path} && echo exists'"
+        cmd = f"sudo -u {self.ssh_user} -H ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR {self.ssh_user}@{self.host} 'test -x {tracker_path} && echo exists'"
         try:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
             return 'exists' in result.stdout
@@ -136,7 +136,7 @@ class RemoteDirtyTracker:
             )
 
         cmd = (
-            f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} "
+            f"sudo -u {self.ssh_user} -H ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR {self.ssh_user}@{self.host} "
             f"'nohup {tracker_cmd} > /tmp/dirty_tracker.log 2>&1 & echo $!'"
         )
 
@@ -162,13 +162,13 @@ class RemoteDirtyTracker:
         import subprocess
 
         # Send SIGTERM to allow graceful shutdown (uffd cleanup + JSON output)
-        cmd = f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} 'sudo kill -TERM {self.tracker_pid} 2>/dev/null || true'"
+        cmd = f"sudo -u {self.ssh_user} -H ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR {self.ssh_user}@{self.host} 'sudo kill -TERM {self.tracker_pid} 2>/dev/null || true'"
         try:
             subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
             logger.info(f"Stopped dirty tracking on {self.host} (was using {self._selected_tracker} tracker)")
             # Wait for tracker process to actually exit (uffd cleanup may take time)
             import time
-            wait_cmd = (f"ssh -o StrictHostKeyChecking=no {self.ssh_user}@{self.host} "
+            wait_cmd = (f"sudo -u {self.ssh_user} -H ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR {self.ssh_user}@{self.host} "
                         f"'for i in $(seq 30); do kill -0 {self.tracker_pid} 2>/dev/null || exit 0; sleep 1; done; "
                         f"sudo kill -9 {self.tracker_pid} 2>/dev/null'")
             subprocess.run(wait_cmd, shell=True, capture_output=True, timeout=40)
@@ -181,7 +181,11 @@ class RemoteDirtyTracker:
         """Collect dirty pattern results from remote host."""
         import subprocess
 
-        cmd = f"scp -o StrictHostKeyChecking=no {self.ssh_user}@{self.host}:{self.output_file} {local_file}"
+        # sudo -u {ssh_user} -H so the scp runs under ubuntu's credentials
+        # even when the pipeline caller is root. See AMI-infra-followups.md.
+        cmd = (f"sudo -u {self.ssh_user} -H scp "
+               f"-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "
+               f"{self.ssh_user}@{self.host}:{self.output_file} {local_file}")
         try:
             result = subprocess.run(cmd, shell=True, capture_output=True, timeout=30)
             if result.returncode == 0:
@@ -492,14 +496,21 @@ class CRIUExperiment:
             logger.info("Hot VMA seeding disabled (--no-hot-vma-seed)")
             return
 
-        # 1. Download dirty_pattern.json from source
+        # 1. Download dirty_pattern.json from source. Use `sudo -u ubuntu -H`
+        # so that the scp inside baseline_experiment (running as root under
+        # sudo -E python3) drops to the ubuntu user and uses ubuntu's SSH
+        # key + known_hosts. Without this, scp runs as root which has a
+        # stale /root/.ssh/known_hosts and no private key for
+        # ubuntu@127.0.0.1, silently fails, and we lose hot-vmas.json.
         local_dirty = '/tmp/_dirty_pattern_tmp.json'
-        cmd = (f"scp -o StrictHostKeyChecking=no "
+        cmd = (f"sudo -u {self.ssh_user} -H scp -o StrictHostKeyChecking=no "
+               f"-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "
                f"{self.ssh_user}@{self.source_host}:/tmp/dirty_pattern.json "
                f"{local_dirty}")
         ret = subprocess.run(cmd, shell=True, capture_output=True, timeout=30)
         if ret.returncode != 0:
-            logger.warning("No dirty_pattern.json on source, skipping hot VMA extraction")
+            logger.warning(f"No dirty_pattern.json on source, skipping hot VMA extraction "
+                           f"(scp rc={ret.returncode}, err={ret.stderr.decode(errors='replace')[:200]})")
             return
 
         # 2. Extract hot VMAs locally
@@ -543,9 +554,12 @@ class CRIUExperiment:
             else:
                 logger.warning(f"Failed to upload hot-vmas.json: {upload_ret.stderr.decode()}")
         else:
-            # Copy to dump dir on source via SCP
+            # Copy to dump dir on source via SCP (under sudo -u ubuntu -H to use
+            # ubuntu's SSH credentials — see AMI-infra-followups.md).
             source_client = self.checkpoint_mgr.get_ssh_client(self.source_host, self.ssh_user)
-            cmd = f"scp -o StrictHostKeyChecking=no {local_hot_vmas} {self.ssh_user}@{self.source_host}:{self.final_checkpoint_dir}/hot-vmas.json"
+            cmd = (f"sudo -u {self.ssh_user} -H scp "
+                   f"-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "
+                   f"{local_hot_vmas} {self.ssh_user}@{self.source_host}:{self.final_checkpoint_dir}/hot-vmas.json")
             subprocess.run(cmd, shell=True, capture_output=True, timeout=30)
             logger.info(f"Copied hot-vmas.json to {self.final_checkpoint_dir} on source")
 
