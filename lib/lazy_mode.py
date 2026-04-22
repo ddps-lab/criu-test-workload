@@ -77,8 +77,9 @@ class LazyConfig:
     page_server_address: str = "0.0.0.0"  # Address to bind on source node
 
     # Async prefetch settings (for *_PREFETCH modes, requires S3)
-    prefetch_workers: int = 4
+    prefetch_workers: int = 0  # 0 = CRIU auto-detects from NIC speed (m5.8xlarge 10 Gbps → 12 workers)
     cache_limit_mb: int = 0  # 0 = auto, >0 = explicit limit in MB
+    prefetch_batch_bytes: Optional[int] = None  # Phase 6 batch coalescing limit (None = criu binary default)
 
     # Ablation options
     no_semi_sync_iov: bool = False    # Disable semi-sync IOV fetch (page-by-page fallback)
@@ -168,6 +169,8 @@ class LazyConfig:
             args.extend(["--async-prefetch", "--prefetch-workers", str(self.prefetch_workers)])
             if self.cache_limit_mb > 0:
                 args.extend(["--cache-limit", str(self.cache_limit_mb)])
+            if self.prefetch_batch_bytes is not None:
+                args.extend(["--prefetch-batch-bytes", str(self.prefetch_batch_bytes)])
             if self.no_hot_vma_seed:
                 args.append("--no-hot-vma-seed")
 
@@ -194,8 +197,9 @@ class LazyConfig:
             mode=LazyMode(config.get('lazy_mode', config.get('mode', 'none'))),
             page_server_port=config.get('page_server_port', 27),
             page_server_address=config.get('page_server_address', '0.0.0.0'),
-            prefetch_workers=config.get('prefetch_workers', 4),
+            prefetch_workers=config.get('prefetch_workers', 0),
             cache_limit_mb=config.get('cache_limit_mb', 0),
+            prefetch_batch_bytes=config.get('prefetch_batch_bytes', None),
             no_semi_sync_iov=config.get('no_semi_sync_iov', False),
             no_async_prefetch=config.get('no_async_prefetch', False),
             no_hot_vma_seed=config.get('no_hot_vma_seed', False),

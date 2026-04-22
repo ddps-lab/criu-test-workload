@@ -54,7 +54,7 @@ checkpoint:
     #   - live-migration-prefetch: S3 pre-copy + page-server post-copy (requires S3)
     lazy_mode: "none"
     page_server_port: 27
-    prefetch_workers: 4
+    prefetch_workers: 0  # 0 = CRIU auto-detects from NIC speed (m5.8xlarge → 12)
 
     # Full dump configuration (only for mode: full)
     wait_before_dump: 30  # seconds to wait before dump
