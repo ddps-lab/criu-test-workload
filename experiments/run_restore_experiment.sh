@@ -98,11 +98,15 @@ declare -A MODE_ARGS
 MODE_ARGS[1_baseline]="BASELINE_SPECIAL"
 MODE_ARGS[2_s3_lazy_only]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-semi-sync-iov --no-async-prefetch --no-hot-vma-seed"
 MODE_ARGS[3_semi_sync]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-async-prefetch --no-hot-vma-seed"
-MODE_ARGS[4_async]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-hot-vma-seed"
-MODE_ARGS[5_full]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON"
+MODE_ARGS[4_async]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-hot-vma-seed --prefetch-workers 12"
+MODE_ARGS[5_full]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --prefetch-workers 12"
 
 # Default: skip 2_s3_lazy_only (much slower than baseline on real S3, run separately if needed)
-MODE_ORDER=(1_baseline 3_semi_sync 4_async 5_full)
+# Default: 1_baseline + 3_semi_sync + 4_async + 5_full. Override with env
+# MODES="4_async 5_full" when you only want the async-path subset (for
+# faster iteration on compress-stack tuning where baseline/semi-sync are
+# uninformative).
+MODE_ORDER=(${MODES:-1_baseline 3_semi_sync 4_async 5_full})
 
 # ============================================================
 # Cleanup function
@@ -121,8 +125,25 @@ cleanup() {
     sudo pkill -9 redis-server 2>/dev/null || true
     sudo pkill -9 -x java 2>/dev/null || true
     sudo pkill -9 -x criu 2>/dev/null || true
+    # Catch YCSB java children and redis/memcached clients by cmdline.
+    # IMPORTANT: `pkill -f` matches the caller's own cmdline when the
+    # script was invoked with "--ycsb-*" args. Exclude self by using
+    # ps+awk with process name filtering instead of pkill -f.
+    local extra_pids
+    extra_pids=$(ps -eo pid,comm,args --no-headers 2>/dev/null \
+        | awk '$2 == "java" && /ycsb|YCSB|com\.yahoo/ {print $1}
+               $2 == "redis-cli" {print $1}
+               $2 ~ /^sh$|^bash$/ && /ycsb.sh|bin\/ycsb/ {print $1}')
+    if [ -n "$extra_pids" ]; then
+        sudo kill -9 $extra_pids 2>/dev/null || true
+    fi
     sudo rm -rf /tmp/criu_checkpoint /tmp/hsperfdata_ubuntu /tmp/hsperfdata_root 2>/dev/null || true
-    sleep 3
+    # Give kernel time to reap zombies and free PIDs.
+    sleep 5
+    # Bump next-allocated PID so cleanup's own sudo children don't land
+    # in the restore target range (~1800-2500), which caused "Can't fork
+    # for X: File exists" failures on redis lazy modes.
+    sudo sh -c 'echo 20000 > /proc/sys/kernel/ns_last_pid' 2>/dev/null || true
 }
 
 # ============================================================

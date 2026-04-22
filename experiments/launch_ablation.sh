@@ -163,7 +163,7 @@ sudo install -m 0644 -o ubuntu -g ubuntu /tmp/default.yaml                  conf
 sudo install -m 0755 -o ubuntu -g ubuntu /tmp/run_restore_experiment.sh     experiments/run_restore_experiment.sh
 
 echo "=== [\$(date +%H:%M:%S)] ablation: ${WL} (${MODE}) against s3://${BUCKET}/${PREFIX}/ ==="
-bash experiments/run_restore_experiment.sh \\
+MODES='${MODES:-}' bash experiments/run_restore_experiment.sh \\
     --workload ${WTYPE} \\
     --s3-prefix ${PREFIX} \\
     --repeat ${REPEAT} \\
