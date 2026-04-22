@@ -136,8 +136,8 @@ for i in $(seq 0 $((N - 1))); do
         "${CRIU_SRC}/criu/criu" ubuntu@$IP:/tmp/criu.phase6-compression >/dev/null
 
     echo "   uploading criu_workload patches..."
-    for f in experiments/baseline_experiment.py lib/checkpoint.py lib/criu_utils.py \
-             experiments/run_restore_experiment.sh; do
+    for f in experiments/baseline_experiment.py lib/checkpoint.py lib/criu_utils.py lib/lazy_mode.py \
+             experiments/run_restore_experiment.sh config/default.yaml; do
         scp -i $SSH_KEY -o StrictHostKeyChecking=no \
             "/spot_kubernetes/criu_workload/$f" \
             ubuntu@$IP:/tmp/$(basename $f) >/dev/null
@@ -158,6 +158,8 @@ echo "=== overlay criu_workload patches ==="
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/baseline_experiment.py        experiments/baseline_experiment.py
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/checkpoint.py                 lib/checkpoint.py
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/criu_utils.py                 lib/criu_utils.py
+sudo install -m 0644 -o ubuntu -g ubuntu /tmp/lazy_mode.py                  lib/lazy_mode.py
+sudo install -m 0644 -o ubuntu -g ubuntu /tmp/default.yaml                  config/default.yaml
 sudo install -m 0755 -o ubuntu -g ubuntu /tmp/run_restore_experiment.sh     experiments/run_restore_experiment.sh
 
 echo "=== [\$(date +%H:%M:%S)] ablation: ${WL} (${MODE}) against s3://${BUCKET}/${PREFIX}/ ==="

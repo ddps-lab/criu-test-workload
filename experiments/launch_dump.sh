@@ -126,8 +126,8 @@ for i in $(seq 0 $((N - 1))); do
         "${CRIU_SRC}/criu/criu" ubuntu@$IP:/tmp/criu.phase6-compression >/dev/null
 
     echo "   uploading criu_workload patches..."
-    for f in experiments/baseline_experiment.py lib/checkpoint.py lib/criu_utils.py \
-             experiments/dump_all_workloads.sh; do
+    for f in experiments/baseline_experiment.py lib/checkpoint.py lib/criu_utils.py lib/lazy_mode.py \
+             experiments/dump_all_workloads.sh config/default.yaml; do
         scp -i $SSH_KEY -o StrictHostKeyChecking=no \
             "/spot_kubernetes/criu_workload/$f" \
             ubuntu@$IP:/tmp/$(basename $f) >/dev/null
@@ -149,6 +149,8 @@ cd /opt/criu_workload
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/baseline_experiment.py  experiments/baseline_experiment.py
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/checkpoint.py           lib/checkpoint.py
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/criu_utils.py           lib/criu_utils.py
+sudo install -m 0644 -o ubuntu -g ubuntu /tmp/lazy_mode.py            lib/lazy_mode.py
+sudo install -m 0644 -o ubuntu -g ubuntu /tmp/default.yaml            config/default.yaml
 sudo install -m 0755 -o ubuntu -g ubuntu /tmp/dump_all_workloads.sh   experiments/dump_all_workloads.sh
 
 echo "=== [\$(date +%H:%M:%S)] dump: ${WL} ${MODE} ==="
