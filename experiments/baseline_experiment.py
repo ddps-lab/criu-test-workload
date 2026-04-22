@@ -409,8 +409,8 @@ def parse_args():
     s3_group.add_argument(
         '--prefetch-workers',
         type=int,
-        default=4,
-        help='Number of prefetch worker threads for lazy-prefetch modes (default: 4)'
+        default=0,
+        help='Number of prefetch worker threads (0 = CRIU auto-detects from NIC speed)'
     )
 
     s3_group.add_argument(
@@ -418,6 +418,13 @@ def parse_args():
         type=int,
         default=None,
         help='Prefetch cache limit in MB (default: auto). 0=auto, N=explicit N MB'
+    )
+
+    s3_group.add_argument(
+        '--prefetch-batch-bytes',
+        type=int,
+        default=None,
+        help='Phase 6: coalesce adjacent IOVs into a single S3 GET up to N bytes (default: criu binary default)'
     )
 
     # Ablation options (for performance analysis)
@@ -451,6 +458,25 @@ def parse_args():
         action='store_true',
         default=False,
         help='Use path-style URLs for S3 (required for MinIO)'
+    )
+    ablation_group.add_argument(
+        '--compress-pages',
+        action='store_true',
+        default=False,
+        help='Append --compress to criu dump so pages-*.img is zstd-seekable '
+             '(restore side auto-detects via magic byte)'
+    )
+    ablation_group.add_argument(
+        '--compress-workers',
+        type=int,
+        default=8,
+        help='N parallel zstd workers for --compress-pages (default 8)'
+    )
+    ablation_group.add_argument(
+        '--readiness-timeout',
+        type=int,
+        default=None,
+        help='Override workload readiness timeout in seconds (default 300)'
     )
 
     # Output
@@ -662,6 +688,8 @@ def build_overrides(args) -> dict:
         overrides['checkpoint.strategy.prefetch_workers'] = args.prefetch_workers
     if args.cache_limit is not None:
         overrides['checkpoint.strategy.cache_limit_mb'] = args.cache_limit
+    if args.prefetch_batch_bytes is not None:
+        overrides['checkpoint.strategy.prefetch_batch_bytes'] = args.prefetch_batch_bytes
 
     # Ablation options
     if args.no_semi_sync_iov:
@@ -674,6 +702,11 @@ def build_overrides(args) -> dict:
         overrides['checkpoint.strategy.s3_direct_upload'] = True
     if args.s3_path_style:
         overrides['s3.path_style'] = True
+    if args.compress_pages:
+        overrides['checkpoint.strategy.compress_pages'] = True
+        overrides['checkpoint.strategy.compress_workers'] = args.compress_workers
+    if args.readiness_timeout is not None:
+        overrides['workload.readiness.timeout'] = args.readiness_timeout
 
     # Transfer overrides
     if args.transfer_method:
