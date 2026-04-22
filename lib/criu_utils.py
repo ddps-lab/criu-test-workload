@@ -415,16 +415,15 @@ class CRIUExperiment:
         # Step 2: Start workload
         self._start_workload()
 
-        # Step 2.5: Start dirty page tracking if enabled
-        logger.info(f"Dirty tracking check: enabled={self._dirty_tracking_enabled}, pid={self.workload_pid}")
-        if self._dirty_tracking_enabled and self.workload_pid:
-            self._start_dirty_tracking()
-        else:
-            logger.info(f"Dirty tracking not started (enabled={self._dirty_tracking_enabled})")
-
         # Step 3: Run checkpoint strategy
-        # Note: dirty tracker is stopped inside strategy methods
-        # (just before dump) because uffd-wp fd blocks CRIU dump.
+        # Dirty tracker lifecycle is owned by each strategy method:
+        #   - predump: starts now, runs through all predump iterations
+        #   - full: late-start (last `dirty_track_pre_dump_window` seconds of
+        #     wait_before_dump) so hot_vma.py's last-N classification sees
+        #     steady-state access pattern without retaining hours of samples
+        # Tracker is always stopped just before dump because uffd-wp fd
+        # blocks CRIU freeze.
+        logger.info(f"Dirty tracking enabled={self._dirty_tracking_enabled}, pid={self.workload_pid}")
         strategy_mode = self.checkpoint_config['strategy']['mode']
         if strategy_mode == 'predump':
             self._run_predump_strategy()
@@ -607,6 +606,11 @@ class CRIUExperiment:
 
         logger.info(f"Running {num_iterations} pre-dump iterations with {interval}s interval")
 
+        # Predump: tracker runs throughout all iterations so each predump's
+        # write-set is observable. Stopped just before final dump below.
+        if self._dirty_tracking_enabled and self.workload_pid and self._dirty_tracker is None:
+            self._start_dirty_tracking()
+
         # Get workload type for CRIU flags
         workload_type = self.experiment_config.get('workload_type', 'memory')
 
@@ -670,16 +674,39 @@ class CRIUExperiment:
         # Check for memory-based or time-based trigger
         target_memory_mb = strategy.get('target_memory_mb')
         wait_time = strategy.get('wait_before_dump', 0)
+        # Tracker runs only the last `dt_window` seconds of the wait so
+        # hot_vma.py's last-N classification samples steady-state access
+        # pattern, and JSON stays small. Default 30s aligns with paper's
+        # N=3 × 5s interval requirement (+ one extra sample of headroom).
+        dt_window = strategy.get('dirty_track_pre_dump_window', 30)
+        want_tracker = self._dirty_tracking_enabled and self.workload_pid
 
         if target_memory_mb is not None:
-            # Memory-based trigger: wait until process memory reaches target
+            # Memory-based trigger: tracker starts when target reached
             logger.info(f"Waiting for process memory to reach {target_memory_mb} MB...")
             if not self._wait_for_target_memory(target_memory_mb):
                 logger.warning("Timeout waiting for target memory, proceeding with dump anyway")
+            if want_tracker:
+                self._start_dirty_tracking()
+                time.sleep(dt_window)  # give the tracker a window before dump
         elif wait_time > 0:
-            # Time-based trigger: wait fixed duration
-            logger.info(f"Waiting {wait_time}s before dump...")
-            time.sleep(wait_time)
+            # Time-based trigger: front-load the idle, start tracker late
+            if want_tracker and wait_time > dt_window:
+                pre_sleep = wait_time - dt_window
+                logger.info(f"Waiting {pre_sleep}s (tracker idle), then {dt_window}s (tracker active) before dump...")
+                time.sleep(pre_sleep)
+                self._start_dirty_tracking()
+                time.sleep(dt_window)
+            else:
+                logger.info(f"Waiting {wait_time}s before dump...")
+                if want_tracker:
+                    self._start_dirty_tracking()
+                time.sleep(wait_time)
+        else:
+            # No wait — if tracker wanted, give it a minimal window
+            if want_tracker:
+                self._start_dirty_tracking()
+                time.sleep(dt_window)
 
         # Stop dirty tracking just before dump (uffd-wp fd blocks CRIU dump)
         if self._dirty_tracker is not None:

@@ -119,7 +119,7 @@ dump_one() {
         --lazy-mode lazy-prefetch \
         --track-dirty-pages \
         --dirty-tracker c \
-        --dirty-track-interval 500 --dirty-track-duration 10 \
+        --dirty-track-interval 5000 \
         --no-cleanup \
         -o "/tmp/dump_${NAME}.json" 2>&1 | tee "/tmp/dump_${NAME}.log" \
         | grep -E 'Uploaded|Final dump|Extracted|hot-vmas|ERROR|WARNING' || true
