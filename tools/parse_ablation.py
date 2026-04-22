@@ -189,6 +189,54 @@ def extract_lazy_log(path):
     if pref_bts:
         out['fetch_prefetch_bytes_sum'] = sum(pref_bts)
 
+    # compression.c / compress_pipeline.c per-ctx stats. Multiple lines per
+    # log (one per decompress_ctx, one per pipeline) — accumulate.
+    # decompress_stats: mode=... calls=N frames=M bytes_comp=X bytes_decomp=Y
+    #   ratio=R fetch_ms=F decomp_ms=D fetch_mbps=... decomp_mbps=...
+    dec_stats = {'n_ctx': 0, 'calls': 0, 'frames': 0, 'bytes_comp': 0,
+                 'bytes_decomp': 0, 'fetch_ms': 0.0, 'decomp_ms': 0.0}
+    for line in _grep(path, 'decompress_stats:'):
+        for k, typ in (('calls', int), ('frames', int), ('bytes_comp', int),
+                       ('bytes_decomp', int), ('fetch_ms', float),
+                       ('decomp_ms', float)):
+            m = re.search(rf'{k}=([\d.]+)', line)
+            if m:
+                dec_stats[k] += typ(m.group(1))
+        dec_stats['n_ctx'] += 1
+    if dec_stats['n_ctx']:
+        out['decomp_n_ctx'] = dec_stats['n_ctx']
+        out['decomp_calls'] = dec_stats['calls']
+        out['decomp_frames'] = dec_stats['frames']
+        out['decomp_bytes_comp'] = dec_stats['bytes_comp']
+        out['decomp_bytes_decomp'] = dec_stats['bytes_decomp']
+        out['decomp_fetch_ms'] = dec_stats['fetch_ms']
+        out['decomp_decomp_ms'] = dec_stats['decomp_ms']
+        if dec_stats['bytes_decomp']:
+            out['decomp_ratio'] = dec_stats['bytes_comp'] / dec_stats['bytes_decomp']
+        if dec_stats['fetch_ms']:
+            out['decomp_fetch_mbps'] = ((dec_stats['bytes_comp'] / 1048576.0)
+                                        / (dec_stats['fetch_ms'] / 1000.0))
+        if dec_stats['decomp_ms']:
+            out['decomp_decomp_mbps'] = ((dec_stats['bytes_decomp'] / 1048576.0)
+                                         / (dec_stats['decomp_ms'] / 1000.0))
+
+    # compress_stats: key=... n_workers=N frames=M bytes_in=X bytes_out=Y
+    #   ratio=R compress_ms_sum=... compress_mbps_per_worker=...
+    for line in _grep(path, 'compress_stats:'):
+        for k, typ in (('n_workers', int), ('frames', int), ('bytes_in', int),
+                       ('bytes_out', int), ('ratio', float),
+                       ('compress_ms_sum', float)):
+            m = re.search(rf'{k}=([\d.]+)', line)
+            if m:
+                out[f'comp_{k}'] = typ(m.group(1))
+        # compute aggregate throughput
+        if out.get('comp_compress_ms_sum') and out.get('comp_bytes_in'):
+            out['comp_mbps_aggregate'] = (
+                (out['comp_bytes_in'] / 1048576.0)
+                / (out['comp_compress_ms_sum'] / 1000.0)
+                * out.get('comp_n_workers', 1)  # workers ran in parallel
+            )
+
     return out
 
 def extract_json(path):
@@ -295,6 +343,13 @@ _NUMERIC = (
     'fetch_prefetch_dur_sum_s', 'fetch_prefetch_dur_mean_ms',
     'fetch_fault_bytes_sum', 'fetch_prefetch_bytes_sum',
     'uffd_copy_n', 'pages_transferred',
+    # compress/decompress ZSTD instrumentation (compression.c / compress_pipeline.c)
+    'decomp_n_ctx', 'decomp_calls', 'decomp_frames',
+    'decomp_bytes_comp', 'decomp_bytes_decomp', 'decomp_ratio',
+    'decomp_fetch_ms', 'decomp_decomp_ms',
+    'decomp_fetch_mbps', 'decomp_decomp_mbps',
+    'comp_n_workers', 'comp_frames', 'comp_bytes_in', 'comp_bytes_out',
+    'comp_ratio', 'comp_compress_ms_sum', 'comp_mbps_aggregate',
 )
 
 def aggregate(rows):
