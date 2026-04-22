@@ -32,6 +32,7 @@ set -uo pipefail
 BUCKET=mhsong-criu-checkpoints
 REGION=us-west-2
 SEL=all
+COMPRESS=0
 : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID env var required}"
 : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY env var required}"
 
@@ -40,9 +41,20 @@ while [[ $# -gt 0 ]]; do
         --bucket)   BUCKET="$2"; shift 2 ;;
         --region)   REGION="$2"; shift 2 ;;
         --workload) SEL="$2"; shift 2 ;;
+        --compress) COMPRESS=1; shift ;;
         *) echo "unknown arg: $1"; exit 1 ;;
     esac
 done
+
+# --compress: produce zstd-seekable page images. S3 prefix gets a
+# "-compressed" suffix so the raw and compressed dumps can coexist and
+# the ablation launcher can pick either with --s3-prefix.
+COMPRESS_FLAGS=""
+PREFIX_SUFFIX=""
+if [ "$COMPRESS" = "1" ]; then
+    COMPRESS_FLAGS="--compress-pages --compress-workers 8"
+    PREFIX_SUFFIX="-compressed"
+fi
 
 # ==========================================================================
 # Canonical workload table — MUST match launch_storage_sweep.sh:ALL_EXPERIMENTS
@@ -85,11 +97,13 @@ dump_one() {
     local entry="$1"
     local NAME TYPE PREFIX EXTRA
     IFS='|' read -r NAME TYPE PREFIX EXTRA <<< "$entry"
+    PREFIX="${PREFIX}${PREFIX_SUFFIX}"
 
     echo "=========================================="
     echo " $NAME → s3://$BUCKET/$PREFIX/"
-    echo " type:  $TYPE"
-    echo " extra: $EXTRA"
+    echo " type:     $TYPE"
+    echo " extra:    $EXTRA"
+    echo " compress: $COMPRESS"
     echo "=========================================="
 
     # 1. Purge stale S3 state so previous attempts don't layer with new dump.
@@ -120,8 +134,9 @@ dump_one() {
         --track-dirty-pages \
         --dirty-tracker c \
         --dirty-track-interval 5000 \
+        $COMPRESS_FLAGS \
         --no-cleanup \
-        -o "/tmp/dump_${NAME}.json" 2>&1 | tee "/tmp/dump_${NAME}.log" \
+        -o "/tmp/dump_${NAME}${PREFIX_SUFFIX}.json" 2>&1 | tee "/tmp/dump_${NAME}${PREFIX_SUFFIX}.log" \
         | grep -E 'Uploaded|Final dump|Extracted|hot-vmas|ERROR|WARNING' || true
     # Intentional: if the restore phase at the tail of the pipeline fails,
     # we still consider the dump successful as long as the checkpoint
