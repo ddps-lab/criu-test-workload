@@ -57,6 +57,19 @@ def parse_lazy_pages_log(log_content: str) -> Dict[str, Any]:
                 'bytes_prefetched': int(m.group(5)),
             }
 
+        # Phase 6.1a fault-path bounded wait stats
+        m = re.search(
+            r'FAULT_WAIT attempted=(\d+) absorbed=(\d+) timed_out=(\d+) not_fetching=(\d+)',
+            line
+        )
+        if m:
+            metrics['fault_wait'] = {
+                'attempted': int(m.group(1)),
+                'absorbed': int(m.group(2)),
+                'timed_out': int(m.group(3)),
+                'not_fetching': int(m.group(4)),
+            }
+
         # Controller stats
         m = re.search(
             r'CONTROLLER faults=(\d+) removes=(\d+) promotes=(\d+) '

@@ -166,8 +166,6 @@ class MatMulWorkload(BaseWorkload):
     def validate_config(self) -> bool:
         if self.matrix_size <= 0:
             raise ValueError(f"matrix_size must be positive, got {self.matrix_size}")
-        if self.matrix_size > 16384:
-            raise ValueError(f"matrix_size too large (max 16384), got {self.matrix_size}")
         return True
 
     def estimate_memory_mb(self) -> float:

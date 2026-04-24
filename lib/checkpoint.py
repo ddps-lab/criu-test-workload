@@ -444,6 +444,13 @@ class CheckpointManager:
         if s3_config is not None:
             criu_cmd_parts.extend(s3_config.get_criu_upload_args())
 
+        # Optional: zstd-seekable compression for pages-*.img.
+        # Restore side auto-detects via the trailing magic byte, so no
+        # other plumbing is needed — just pass the flag at dump time.
+        if self.strategy.get('compress_pages', False):
+            nw = int(self.strategy.get('compress_workers', 8))
+            criu_cmd_parts.extend(['--compress', '--compress-workers', str(nw)])
+
         criu_cmd = " ".join(criu_cmd_parts)
 
         # For live migration (page-server mode), run in background

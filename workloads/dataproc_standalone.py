@@ -304,7 +304,9 @@ class DataSource:
         init_start = time.time()
         if HAS_NUMPY:
             np.random.seed(42)
-            self.data = np.random.randn(num_rows, num_cols).astype(np.float64)
+            # randn already returns float64; avoid a redundant .astype() that
+            # doubles peak memory during init (randn buffer + astype copy).
+            self.data = np.random.randn(num_rows, num_cols)
             # Add some structure: trends, correlations
             for c in range(min(5, num_cols)):
                 self.data[:, c] += np.linspace(0, 2, num_rows)  # trend
