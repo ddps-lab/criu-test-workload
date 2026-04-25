@@ -30,6 +30,7 @@ BUCKET="${BUCKET:-mhsong-criu-checkpoints}"
 
 MODE_RAW=0
 MODE_COMP=0
+REPEAT=1
 WORKLOADS=()
 
 while [[ $# -gt 0 ]]; do
@@ -37,6 +38,8 @@ while [[ $# -gt 0 ]]; do
         --compress) MODE_COMP=1; shift ;;
         --raw)      MODE_RAW=1; shift ;;
         --both)     MODE_RAW=1; MODE_COMP=1; shift ;;
+        --repeat)   REPEAT="$2"; shift 2 ;;
+        --all)      WORKLOADS=(matmul dataproc ml-training xgboost redis mc-1gb mc-4gb mc-8gb mc-16gb); shift ;;
         *)          WORKLOADS+=("$1"); shift ;;
     esac
 done
@@ -125,13 +128,20 @@ for i in $(seq 0 $((N - 1))); do
     scp -i $SSH_KEY -o StrictHostKeyChecking=no \
         "${CRIU_SRC}/criu/criu" ubuntu@$IP:/tmp/criu.phase6-compression >/dev/null
 
-    echo "   uploading criu_workload patches..."
-    for f in experiments/baseline_experiment.py lib/checkpoint.py lib/criu_utils.py lib/lazy_mode.py \
-             experiments/dump_all_workloads.sh config/default.yaml; do
-        scp -i $SSH_KEY -o StrictHostKeyChecking=no \
-            "/spot_kubernetes/criu_workload/$f" \
-            ubuntu@$IP:/tmp/$(basename $f) >/dev/null
-    done
+    echo "   syncing criu_workload tree (rsync)..."
+    # Sync the full source dirs (lib/ workloads/ experiments/ config/ tools/)
+    # so any local edit — committed or uncommitted — propagates to EC2.
+    # Per-file scp lists used to drift behind reality whenever a new file
+    # got added. rsync also preserves perms; install steps below re-apply
+    # ownership to ubuntu.
+    rsync -a -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+        --exclude '__pycache__' --exclude '*.pyc' --exclude '.git' \
+        /spot_kubernetes/criu_workload/lib \
+        /spot_kubernetes/criu_workload/workloads \
+        /spot_kubernetes/criu_workload/experiments \
+        /spot_kubernetes/criu_workload/config \
+        /spot_kubernetes/criu_workload/tools \
+        ubuntu@$IP:/tmp/criu_workload_sync/ >/dev/null
 
     # Driver: install criu + patches, then run dump_all_workloads.sh
     ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$IP "cat > /tmp/driver.sh" <<DRIVER
@@ -144,27 +154,44 @@ echo "=== install criu ==="
 sudo install -m 0755 /tmp/criu.phase6-compression /usr/local/sbin/criu
 /usr/local/sbin/criu --version
 
-echo "=== overlay criu_workload patches ==="
+echo "=== overlay criu_workload tree (lib workloads experiments config tools) ==="
 cd /opt/criu_workload
-sudo install -m 0644 -o ubuntu -g ubuntu /tmp/baseline_experiment.py  experiments/baseline_experiment.py
-sudo install -m 0644 -o ubuntu -g ubuntu /tmp/checkpoint.py           lib/checkpoint.py
-sudo install -m 0644 -o ubuntu -g ubuntu /tmp/criu_utils.py           lib/criu_utils.py
-sudo install -m 0644 -o ubuntu -g ubuntu /tmp/lazy_mode.py            lib/lazy_mode.py
-sudo install -m 0644 -o ubuntu -g ubuntu /tmp/default.yaml            config/default.yaml
-sudo install -m 0755 -o ubuntu -g ubuntu /tmp/dump_all_workloads.sh   experiments/dump_all_workloads.sh
+# Overlay the rsync'd copy of each dir wholesale. rsync brings in all
+# committed + uncommitted local files; this overlay lands them where
+# dump_all_workloads.sh expects (ownership: ubuntu).
+for d in lib workloads experiments config tools; do
+    if [ -d /tmp/criu_workload_sync/\$d ]; then
+        sudo rsync -a --chown=ubuntu:ubuntu \
+            /tmp/criu_workload_sync/\$d/ /opt/criu_workload/\$d/
+    fi
+done
+# Make experiments scripts executable
+sudo chmod +x /opt/criu_workload/experiments/*.sh 2>/dev/null || true
 
-echo "=== [\$(date +%H:%M:%S)] dump: ${WL} ${MODE} ==="
+echo "=== [\$(date +%H:%M:%S)] dump: ${WL} ${MODE} (repeat x${REPEAT}) ==="
 bash experiments/dump_all_workloads.sh \\
     --bucket '${BUCKET}' --region '${REGION}' \\
     --workload '${WL}' \\
+    --repeat ${REPEAT} \\
     ${COMPRESS_FLAG} \\
     > /tmp/dump.log 2>&1
 echo "Dump exit: \$?"
 
 aws s3 ls s3://${BUCKET}/${WL}${COMPRESS_FLAG:+-compressed}/ --region ${REGION} --human-readable --summarize | tail -5 || true
 
+# Upload the full dump_all_workloads output (spans all repeats) so run-
+# level progress / timing is recoverable after self-terminate. Goes to a
+# single canonical location per (workload, mode).
+aws s3 cp /tmp/dump.log \\
+    s3://${BUCKET}/${WL}${COMPRESS_FLAG:+-compressed}/dump-metrics/dump_all_workloads.log \\
+    --region ${REGION} --only-show-errors || true
+
 echo "=== [\$(date +%H:%M:%S)] DONE — self-terminating ==="
-INSTANCE_ID=\$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+# IMDSv2 requires a token for metadata reads; bare curl returns 401.
+TOKEN=\$(curl -sX PUT http://169.254.169.254/latest/api/token \\
+    -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
+INSTANCE_ID=\$(curl -s -H "X-aws-ec2-metadata-token: \$TOKEN" \\
+    http://169.254.169.254/latest/meta-data/instance-id)
 aws ec2 terminate-instances --instance-ids \$INSTANCE_ID --region ${REGION}
 DRIVER
 
