@@ -17,7 +17,7 @@
 #   AMI_ID (default v4 kernel-6.8 AMI), CRIU_SRC (default dev path), SSH_KEY
 set -e
 
-AMI_ID="${AMI_ID:-ami-0fd8cddbe746f93aa}"
+AMI_ID="${AMI_ID:-ami-0697e5cc271d1da64}"  # criu-workload-v6-20260425
 INSTANCE_TYPE="m5.8xlarge"
 KEY_NAME="mhsong-ddps-oregon"
 SG="sg-0eb08e8fa10cb3031"
