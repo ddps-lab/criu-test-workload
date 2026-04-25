@@ -230,9 +230,13 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
                    ycsb_threads: int, target_throughput: int) -> subprocess.Popen:
     """Run a YCSB phase (load or run).
 
-    Returns the subprocess.Popen object. YCSB client is NOT started with
-    setsid — it is a load generator, NOT a checkpoint target.
+    /opt/ycsb/bin/ycsb is a bash wrapper that exec()s java in the
+    foreground. We start it in its own process group via setsid so we
+    can later kill the entire tree (bash + java + their children) with
+    os.killpg(); otherwise Popen.terminate() reaches only the bash and
+    leaves the java grandchild as a PPID=1 orphan that races the dump.
     """
+    import os as _os
     ycsb_bin = get_ycsb_bin(ycsb_home)
     cmd = [
         ycsb_bin, phase, 'redis', '-s',
@@ -248,8 +252,37 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        preexec_fn=_os.setsid,
     )
     return process
+
+
+def kill_ycsb_proc(proc: subprocess.Popen, label: str = "YCSB"):
+    """Kill an entire YCSB process group (bash wrapper + java child)."""
+    import os as _os
+    import signal as _signal
+    if proc is None:
+        return
+    try:
+        pgid = _os.getpgid(proc.pid)
+    except ProcessLookupError:
+        try: proc.wait(timeout=1)
+        except Exception: pass
+        return
+    try:
+        _os.killpg(pgid, _signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        try: _os.killpg(pgid, _signal.SIGKILL)
+        except ProcessLookupError: pass
+        try: proc.wait(timeout=5)
+        except Exception: pass
+    except Exception:
+        pass
+    print(f"[Redis] {label} process group ({pgid}) terminated")
 
 
 def run_ycsb_operations(
@@ -522,6 +555,7 @@ def run_redis_workload(
     ycsb_threads: int = 1,
     target_throughput: int = 0,
     keep_running: bool = True,
+    warmup_seconds: int = 30,
 ):
     """
     Main Redis workload.
@@ -609,34 +643,71 @@ def run_redis_workload(
         print(f"[Redis] ===================================")
         print(f"[Redis]")
 
-        # IMPORTANT: do not start YCSB run phase before dump.
-        # If java is alive at dump time, the JVM races with CRIU's freeze
-        # (DependencyContext / GC / glibc malloc) and causes thread crashes.
-        # Instead we wait here with NO java/ycsb running. CRIU dumps the
-        # wrapper + redis-server tree only. After restore (checkpoint_flag
-        # removed by the framework), we start YCSB run phase fresh.
-        print(f"[Redis] YCSB load done. Sleeping until restore (no YCSB running).")
-        while not check_restore_complete(working_dir):
-            time.sleep(1)
-        print(f"[Redis] Restore detected at {time.time():.0f}, starting YCSB run phase")
+        # YCSB run is started here so the dirty page tracker observes a
+        # real run-phase access pattern (zipfian / random reads + writes)
+        # rather than the post-load idle state.
+        #
+        # Mode auto-detection mirrors memcached_standalone: if checkpoint_
+        # flag disappears within `warmup_seconds`, we are in dirty_track_
+        # only mode and just keep YCSB running. Otherwise (real dump) we
+        # kill YCSB before the dump to avoid the JVM/CRIU freeze race
+        # (DependencyContext / GC / glibc malloc → SIGSEGV) and resume
+        # with a fresh YCSB after restore.
+        # Same env-var auto-derivation as memcached_standalone: if the
+        # framework set WAIT_BEFORE_DUMP, kill YCSB ~1 s before the dump
+        # so the dirty tracker's last consecutive samples see active
+        # writes. dirty_track_only doesn't set this env var.
+        _env_wait = os.environ.get('WAIT_BEFORE_DUMP')
+        if _env_wait:
+            try:
+                _wt = int(_env_wait)
+                if _wt > 0:
+                    warmup_seconds = max(_wt - 1, 1)
+                    print(f"[Redis] WAIT_BEFORE_DUMP={_wt}s detected; "
+                          f"auto-setting warmup_seconds={warmup_seconds}")
+            except ValueError:
+                pass
+
+        print(f"[Redis] Starting YCSB run for dirty-tracker-visible warmup "
+              f"(limit={warmup_seconds}s before kill in dump mode)")
         run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
                                   ycsb_threads, target_throughput)
         print(f"[Redis] YCSB run started (pid={run_proc.pid})")
-        # Stay alive forever; the run process drives load while we sleep.
+
+        warmup_start = time.time()
+        while True:
+            if check_restore_complete(working_dir):
+                print(f"[Redis] checkpoint_flag removed during warmup "
+                      f"(elapsed={time.time()-warmup_start:.1f}s); "
+                      f"continuing YCSB run without kill")
+                break
+            if time.time() - warmup_start >= warmup_seconds:
+                print(f"[Redis] Warmup window ({warmup_seconds}s) elapsed; "
+                      f"killing YCSB process group before dump to avoid JVM/CRIU race")
+                kill_ycsb_proc(run_proc, label="warmup YCSB")
+                run_proc = None
+                print(f"[Redis] Waiting for restore (flag removal) ...")
+                while not check_restore_complete(working_dir):
+                    time.sleep(1)
+                print(f"[Redis] Restore detected; starting fresh YCSB run")
+                run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                                          ycsb_threads, target_throughput)
+                print(f"[Redis] YCSB run restarted (pid={run_proc.pid})")
+                break
+            time.sleep(0.5)
+
+        # Steady-state: respawn YCSB if it ever exits.
         try:
             while True:
                 time.sleep(5)
                 if run_proc.poll() is not None:
-                    # YCSB exited (e.g., wall-clock duration); spawn another
-                    # so the load generator stays active for measurement.
                     run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
                                               ycsb_threads, target_throughput)
                     print(f"[Redis] YCSB respawned (pid={run_proc.pid})")
         except KeyboardInterrupt:
             print(f"[Redis] Interrupted")
         finally:
-            try: run_proc.terminate()
-            except Exception: pass
+            kill_ycsb_proc(run_proc, label="steady-state YCSB")
             try:
                 if client:
                     client.shutdown(nosave=True)
@@ -871,6 +942,18 @@ def main():
         action='store_true',
         help='Stop when restore is detected (checkpoint_flag removed). Default: keep running.'
     )
+    parser.add_argument(
+        '--ycsb-warmup-seconds',
+        type=int,
+        default=30,
+        help='Run YCSB for this many seconds after the load phase so the '
+             'dirty page tracker observes a real run-phase access pattern '
+             'before dump. After the window elapses YCSB is killed (avoids '
+             'JVM/CRIU freeze race) and the wrapper waits for restore. If '
+             'checkpoint_flag is removed earlier (dirty_track_only mode), '
+             'YCSB just keeps running. Default: 30 (matches framework '
+             'dirty_track_pre_dump_window).'
+    )
 
     args = parser.parse_args()
     args.keep_running = not args.stop_on_restore
@@ -887,6 +970,7 @@ def main():
         ycsb_threads=args.ycsb_threads,
         target_throughput=args.target_throughput,
         keep_running=args.keep_running,
+        warmup_seconds=args.ycsb_warmup_seconds,
     )
 
 

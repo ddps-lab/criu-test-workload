@@ -189,7 +189,17 @@ memcached.hosts=localhost:{port}
 
 def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
                    ycsb_threads: int, target_throughput: int) -> subprocess.Popen:
-    """Run a YCSB phase (load or run) against memcached."""
+    """Run a YCSB phase (load or run) against memcached.
+
+    The /opt/ycsb/bin/ycsb script is a bash wrapper that exec()s java in
+    the foreground. If we just call Popen.terminate() on the bash, the
+    java grandchild becomes a PPID=1 orphan and keeps running. CRIU sees
+    that orphan as still-alive JVM threads and races with their state
+    during freeze. To kill the entire YCSB tree atomically we put it in
+    its own process group via setsid (preexec_fn=os.setsid) and later
+    signal the whole group with os.killpg().
+    """
+    import os as _os
     ycsb_bin = get_ycsb_bin(ycsb_home)
     cmd = [
         ycsb_bin, phase, 'memcached', '-s',
@@ -205,8 +215,42 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        preexec_fn=_os.setsid,
     )
     return process
+
+
+def kill_ycsb_proc(proc: subprocess.Popen, label: str = "YCSB"):
+    """Kill an entire YCSB process group (bash wrapper + java child).
+
+    Sends SIGTERM to the process group, waits up to 15 s, then SIGKILLs
+    the group if anything is still alive. Always reaps the bash so the
+    parent doesn't accumulate zombies.
+    """
+    import os as _os
+    import signal as _signal
+    if proc is None:
+        return
+    try:
+        pgid = _os.getpgid(proc.pid)
+    except ProcessLookupError:
+        try: proc.wait(timeout=1)
+        except Exception: pass
+        return
+    try:
+        _os.killpg(pgid, _signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        try: _os.killpg(pgid, _signal.SIGKILL)
+        except ProcessLookupError: pass
+        try: proc.wait(timeout=5)
+        except Exception: pass
+    except Exception:
+        pass
+    print(f"[Memcached] {label} process group ({pgid}) terminated")
 
 
 def run_memcached_workload(
@@ -221,6 +265,7 @@ def run_memcached_workload(
     duration: int = 0,
     working_dir: str = '.',
     keep_running: bool = True,
+    warmup_seconds: int = 30,
 ):
     """
     Main Memcached + YCSB workload.
@@ -312,19 +357,78 @@ def run_memcached_workload(
     print(f"[Memcached] ===================================")
     print(f"[Memcached]")
 
-    # IMPORTANT: do not start YCSB run phase before dump.
-    # If java is alive at dump time, the JVM races with CRIU's freeze
-    # (DependencyContext / GC / glibc malloc) and causes thread crashes.
-    # Instead we wait here with NO java/ycsb running. CRIU dumps the
-    # wrapper + memcached tree only. After restore (checkpoint_flag
-    # removed by the framework), we start YCSB run phase fresh.
-    print(f"[Memcached] YCSB load done. Sleeping until restore (no YCSB running).")
-    while not check_restore_complete(working_dir):
-        time.sleep(1)
-    print(f"[Memcached] Restore detected at {time.time():.0f}, starting YCSB run phase")
+    # YCSB run is started here so the dirty page tracker has an actively
+    # exercised memory pattern to observe (zipfian / random reads + writes
+    # rather than the post-load idle state).
+    #
+    # Two modes are supported, auto-detected by how quickly checkpoint_flag
+    # disappears:
+    #
+    #   1. dirty_track_only — caller (experiments/dirty_track_only.py)
+    #      removes checkpoint_flag almost immediately after the ready
+    #      signal, so YCSB just keeps running through the entire tracking
+    #      window. Warmup limit is irrelevant here because we never reach
+    #      it.
+    #   2. dump strategy — framework keeps checkpoint_flag in place until
+    #      restore completes. We can't let YCSB Java run through the dump
+    #      itself (JVM freeze races with CRIU and SIGSEGVs the slab
+    #      threads), so once we exceed `warmup_seconds` we kill YCSB and
+    #      keep waiting for the flag removal that signals restore done.
+    #      After restore we start a fresh YCSB run.
+    #
+    # Default warmup_seconds = 30 matches the framework's default
+    # `dirty_track_pre_dump_window` so the tracker observes ~30s of run-
+    # phase activity before dump even without explicit configuration.
+    # If the framework set WAIT_BEFORE_DUMP, prefer it over the CLI
+    # default. This lets dump-strategy callers (lib/criu_utils.py) align
+    # the warmup so YCSB stays alive through the tracker's final sample
+    # without manually passing --ycsb-warmup-seconds. dirty_track_only
+    # never sets this env var, so its CLI value is preserved.
+    _env_wait = os.environ.get('WAIT_BEFORE_DUMP')
+    if _env_wait:
+        try:
+            _wt = int(_env_wait)
+            if _wt > 0:
+                warmup_seconds = max(_wt - 1, 1)
+                print(f"[Memcached] WAIT_BEFORE_DUMP={_wt}s detected; "
+                      f"auto-setting warmup_seconds={warmup_seconds}")
+        except ValueError:
+            pass
+
+    print(f"[Memcached] Starting YCSB run for dirty-tracker-visible warmup "
+          f"(limit={warmup_seconds}s before kill in dump mode)")
     run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
                               ycsb_threads, target_throughput)
     print(f"[Memcached] YCSB run started (pid={run_proc.pid})")
+
+    warmup_start = time.time()
+    flag_removed_during_warmup = False
+    while True:
+        if check_restore_complete(working_dir):
+            # checkpoint_flag was removed before warmup_seconds elapsed.
+            # Treat as dirty-track-only mode: keep YCSB running.
+            flag_removed_during_warmup = True
+            print(f"[Memcached] checkpoint_flag removed during warmup "
+                  f"(elapsed={time.time()-warmup_start:.1f}s); "
+                  f"continuing YCSB run without kill")
+            break
+        if time.time() - warmup_start >= warmup_seconds:
+            print(f"[Memcached] Warmup window ({warmup_seconds}s) elapsed; "
+                  f"killing YCSB process group before dump to avoid JVM/CRIU race")
+            kill_ycsb_proc(run_proc, label="warmup YCSB")
+            run_proc = None
+            # Keep waiting for the actual flag removal (post-restore).
+            print(f"[Memcached] Waiting for restore (flag removal) ...")
+            while not check_restore_complete(working_dir):
+                time.sleep(1)
+            print(f"[Memcached] Restore detected; starting fresh YCSB run")
+            run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
+                                      ycsb_threads, target_throughput)
+            print(f"[Memcached] YCSB run restarted (pid={run_proc.pid})")
+            break
+        time.sleep(0.5)
+
+    # Steady-state monitor: respawn YCSB if it ever exits.
     try:
         while True:
             time.sleep(5)
@@ -335,8 +439,9 @@ def run_memcached_workload(
     except KeyboardInterrupt:
         print(f"[Memcached] Interrupted")
     finally:
-        try: run_proc.terminate()
-        except Exception: pass
+        # Kill the entire YCSB process group (bash wrapper + java child)
+        # so we don't leave orphan JVMs behind on shutdown.
+        kill_ycsb_proc(run_proc, label="steady-state YCSB")
         try:
             mc_process.terminate()
             mc_process.wait(timeout=5)
@@ -509,6 +614,18 @@ def main():
         default=False,
         help='Stop when restore is detected (checkpoint_flag removed). Default: keep running.'
     )
+    parser.add_argument(
+        '--ycsb-warmup-seconds',
+        type=int,
+        default=30,
+        help='Run YCSB for this many seconds after the load phase so the '
+             'dirty page tracker observes a real run-phase access pattern '
+             'before dump. After the window elapses YCSB is killed (avoids '
+             'JVM/CRIU freeze race) and the wrapper waits for restore. If '
+             'checkpoint_flag is removed earlier (dirty_track_only mode), '
+             'YCSB just keeps running. Default: 30 (matches framework '
+             'dirty_track_pre_dump_window).'
+    )
 
     args = parser.parse_args()
     args.keep_running = not args.stop_on_restore
@@ -525,6 +642,7 @@ def main():
         duration=args.duration,
         working_dir=args.working_dir,
         keep_running=args.keep_running,
+        warmup_seconds=args.ycsb_warmup_seconds,
     )
 
 

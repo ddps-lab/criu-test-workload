@@ -578,6 +578,19 @@ class CRIUExperiment:
         # Get workload command
         workload_command = self.workload.get_command()
 
+        # Pass wait_before_dump to the wrapper via env var so YCSB-style
+        # standalones (memcached/redis) can auto-derive their internal
+        # ycsb_warmup_seconds. The wrapper kills YCSB ~1 s before dump so
+        # the framework's dirty tracker (interval=5 s, last 3 consecutive
+        # scans for hot VMA) sees an active write window through its
+        # final sample. Wrappers that don't read the env var simply
+        # ignore it.
+        wait_time_for_env = int(self.checkpoint_config.get('strategy', {}).get(
+            'wait_before_dump', 0))
+        if wait_time_for_env > 0:
+            workload_command = (f"WAIT_BEFORE_DUMP={wait_time_for_env} "
+                                f"{workload_command}")
+
         # Start workload on source host
         self.workload_pid = self.checkpoint_mgr.start_workload(
             self.source_host,

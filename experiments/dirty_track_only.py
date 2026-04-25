@@ -107,6 +107,9 @@ def build_workload_cmd(args, working_dir: str) -> list:
             cmd.extend(['--ycsb-threads', str(args.ycsb_threads)])
         if args.target_throughput:
             cmd.extend(['--target-throughput', str(args.target_throughput)])
+        # See note in memcached branch: inflate warmup so the wrapper does
+        # not kill YCSB before the tracking window ends.
+        cmd.extend(['--ycsb-warmup-seconds', str(args.duration + 60)])
 
     elif args.workload == 'ml_training':
         if args.model_size:
@@ -169,6 +172,12 @@ def build_workload_cmd(args, working_dir: str) -> list:
             cmd.extend(['--ycsb-threads', str(args.ycsb_threads)])
         if args.target_throughput:
             cmd.extend(['--target-throughput', str(args.target_throughput)])
+        # Inflate the wrapper's warmup window so it never elapses during a
+        # dirty_track_only run. The wrapper auto-detects "checkpoint_flag
+        # removed early" and keeps YCSB running, but if our --duration is
+        # longer than the wrapper's default 30 s warmup, the wrapper would
+        # otherwise kill YCSB mid-tracking. Set to duration + safety margin.
+        cmd.extend(['--ycsb-warmup-seconds', str(args.duration + 60)])
 
     elif args.workload == "memwrite":
         if hasattr(args, "buffer_mb") and args.buffer_mb:
@@ -453,13 +462,53 @@ def main():
         start_new_session=True  # setsid: prevent process group kill from sudo tracker
     )
 
+    # Attach the tracker to the wrapper PID immediately. track_children
+    # auto-discovers descendants (memcached/redis-server, then ycsb java)
+    # as the wrapper forks them, so the tracker observes load + run-phase
+    # writes end-to-end. Tracker's internal -d duration is inflated past
+    # any plausible YCSB load latency; the outer observation window is
+    # gated by `args.duration` after wait_for_checkpoint_ready.
     tracker = None
     tracker_proc = None
+    selected_tracker = select_tracker(args.dirty_tracker)
+    clear_mode = "no-clear (accumulate)" if args.dirty_no_clear else "clear after scan"
+    if args.output:
+        tracker_output = args.output
+    else:
+        tracker_output = os.path.join(working_dir, 'dirty_result.json')
+    use_external = (selected_tracker in ('c', 'go') or
+                    (selected_tracker == 'python' and os.geteuid() != 0))
+    # Generous total tracker duration: workload load can take >60s for
+    # large YCSB record counts. We will SIGTERM the tracker when our
+    # observation window ends, so this is just an upper bound.
+    tracker_total_duration = args.duration + 600
+    logger.info(f"Starting {selected_tracker} tracker on wrapper PID "
+                f"{workload_proc.pid} (auto-attaches to children); "
+                f"interval={args.dirty_track_interval}ms, {clear_mode}, "
+                f"max duration={tracker_total_duration}s")
+    if use_external:
+        os.makedirs(os.path.dirname(os.path.abspath(tracker_output)), exist_ok=True)
+        tracker_proc = start_external_tracker(
+            selected_tracker, workload_proc.pid,
+            args.dirty_track_interval, tracker_total_duration,
+            args.workload, tracker_output, args.dirty_no_clear,
+            uffd_sync=args.uffd_sync, sd_only=args.sd_only
+        )
+    else:
+        tracker = DirtyPageTracker(
+            pid=workload_proc.pid,
+            interval_ms=args.dirty_track_interval,
+            track_children=args.track_children,
+            no_clear=args.dirty_no_clear
+        )
+        tracker.start()
+
     try:
-        # Wait for workload to be ready
+        # Wait for workload to be ready (load phase done). Tracker is
+        # already running and observing the load writes.
         logger.info("Waiting for workload to become ready...")
         try:
-            workload_pid = wait_for_checkpoint_ready(working_dir, timeout=120)
+            workload_pid = wait_for_checkpoint_ready(working_dir, timeout=300)
         except TimeoutError as e:
             logger.error(str(e))
             workload_proc.terminate()
@@ -467,40 +516,27 @@ def main():
 
         logger.info(f"Workload ready (PID: {workload_pid})")
 
-        # Select tracker backend
-        selected_tracker = select_tracker(args.dirty_tracker)
-        clear_mode = "no-clear (accumulate)" if args.dirty_no_clear else "clear after scan"
-        logger.info(f"Using {selected_tracker} tracker for {args.duration}s "
-                     f"(interval={args.dirty_track_interval}ms, {clear_mode})")
-
-        # Determine output file path for external trackers
-        if args.output:
-            tracker_output = args.output
-        else:
-            tracker_output = os.path.join(working_dir, 'dirty_result.json')
-
-        use_external = (selected_tracker in ('c', 'go') or
-                        (selected_tracker == 'python' and os.geteuid() != 0))
-        tracker_proc = None
-
-        if use_external:
-            # External tracker (C/Go/Python standalone) via subprocess
-            os.makedirs(os.path.dirname(os.path.abspath(tracker_output)), exist_ok=True)
-            tracker_proc = start_external_tracker(
-                selected_tracker, workload_pid,
-                args.dirty_track_interval, args.duration,
-                args.workload, tracker_output, args.dirty_no_clear,
-                uffd_sync=args.uffd_sync, sd_only=args.sd_only
+        # YCSB-style wrappers block between load and run on checkpoint_flag
+        # removal. Remove the flag here to release the wrapper into its
+        # YCSB run phase. Tracker is already attached so it captures the
+        # full load → run transition.
+        if args.workload in ('memcached', 'redis'):
+            logger.info(
+                "YCSB workload detected; removing checkpoint_flag to "
+                "release the wrapper into YCSB run phase"
             )
-        else:
-            # In-process Python tracker
-            tracker = DirtyPageTracker(
-                pid=workload_pid,
-                interval_ms=args.dirty_track_interval,
-                track_children=args.track_children,
-                no_clear=args.dirty_no_clear
-            )
-            tracker.start()
+            try:
+                os.remove(flag_path)
+            except FileNotFoundError:
+                pass
+            # JVM cold start + first YCSB ops typically settle in 3-5 s.
+            time.sleep(5)
+
+        # Tracker is already attached (started at workload spawn). The
+        # observation window is `args.duration` seconds from this point —
+        # which is the wrapper's run-phase entry. Earlier samples (load
+        # phase) are still in the tracker's history and feed hot-VMA
+        # classification's "last N consecutive scans > theta" criterion.
 
         # Wait for tracking duration (interruptible)
         stop_event = threading.Event()
