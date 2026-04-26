@@ -209,8 +209,17 @@ for run in \$(seq 1 ${REPEAT}); do
     echo ""
     echo "--- ${WL} run \$run/${REPEAT} (\$(date +%H:%M:%S)) ---"
 
-    # Bump ns_last_pid on both sides to avoid PID collisions.
-    sudo sh -c 'echo 10000 > /proc/sys/kernel/ns_last_pid' 2>/dev/null || true
+    # PID collision fix: source dump records workload PIDs, dest already has
+    # its own SSH/baseline_experiment processes in the ~10000-20000 range
+    # post-bump. If both sides use the same ns_last_pid floor, the dump's
+    # PIDs (e.g. 10324-10343 for matmul) collide with dest's running PIDs
+    # in the same range, manifesting as "Unable to create a thread: -17"
+    # (EEXIST) inside the pie restorer.
+    #
+    # Push source workload PIDs to a range way above anything dest uses
+    # (10^6+) so dest can always restore them without preempting its own
+    # processes. Dest stays at the original 10000 floor.
+    sudo sh -c 'echo 1000000 > /proc/sys/kernel/ns_last_pid' 2>/dev/null || true
     ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} \\
         "sudo sh -c 'echo 10000 > /proc/sys/kernel/ns_last_pid'" 2>/dev/null || true
 
