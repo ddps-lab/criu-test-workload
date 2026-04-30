@@ -166,7 +166,27 @@ typedef struct {
     bool use_pagemap_scan;
 } process_tracker_t;
 
-/* Per-VMA dirty page summary (lightweight, for timeline) */
+/* CRIU IOV granularity: 4 MB (1024 pages). Hot regions are tracked at this
+ * granularity within each VMA so the analysis aligns with the unit CRIU
+ * actually compresses (one zstd seekable frame) and lazy-restore prefetches
+ * (one Range GET). */
+#define CHUNK_BYTES (4ULL * 1024 * 1024)
+#define CHUNK_PAGES (CHUNK_BYTES / PAGE_SIZE)
+
+/* Per-VMA dirty page summary (lightweight, for timeline).
+ *
+ * chunk_dirty[k] = number of dirty pages in chunk k of this VMA, where
+ * chunk k spans [start + k*CHUNK_BYTES, min(start + (k+1)*CHUNK_BYTES, end)).
+ * The last chunk may be partial. chunk_count = ceil((end-start)/CHUNK_BYTES).
+ *
+ * Memory: each chunk_dirty entry is 2 bytes (uint16). For an 8 GB writable VMA
+ * that is 2048 chunks × 2 = 4 KB per sample. 720 samples × 1000 VMAs = 3 GB
+ * worst case in long profiles, but typical workloads have far fewer VMAs and
+ * much smaller writable footprint.
+ *
+ * Allocated lazily: chunk_dirty == NULL means tracker hasn't seen this VMA
+ * with chunk-level data yet. Backwards-compatible with consumers that only
+ * read dirty_pages / total_pages. */
 typedef struct {
     uint64_t start;
     uint64_t end;
@@ -174,6 +194,8 @@ typedef struct {
     int total_pages;
     char perms[8];
     vma_type_t vma_type;
+    uint16_t *chunk_dirty;   /* per-chunk dirty page count, NULL if unset */
+    int chunk_count;          /* number of chunks (size of chunk_dirty[]) */
 } vma_dirty_summary_t;
 
 /* Sample */
@@ -560,7 +582,12 @@ static void tracker_cleanup(tracker_t *t) {
     free(t->current_sample.pages);
     free(t->current_sample.sd_pages);
     free(t->current_sample.pids_tracked);
-    free(t->current_sample.vma_summaries);
+    if (t->current_sample.vma_summaries) {
+        for (int v = 0; v < t->current_sample.vma_summary_count; v++) {
+            free(t->current_sample.vma_summaries[v].chunk_dirty);
+        }
+        free(t->current_sample.vma_summaries);
+    }
 
     /* Free unique address hash table */
     for (int i = 0; i < UNIQUE_HASH_SIZE; i++) {
@@ -572,8 +599,11 @@ static void tracker_cleanup(tracker_t *t) {
         }
     }
 
-    /* Free timeline (including per-entry VMA summaries) */
+    /* Free timeline (including per-entry VMA summaries + chunk_dirty arrays) */
     for (int i = 0; i < t->timeline_count; i++) {
+        for (int v = 0; v < t->timeline[i].vma_summary_count; v++) {
+            free(t->timeline[i].vma_summaries[v].chunk_dirty);
+        }
         free(t->timeline[i].vma_summaries);
     }
     free(t->timeline);
@@ -1419,12 +1449,36 @@ static int ensure_page_capacity(dirty_page_t **pages, int *capacity, int require
 
 /* ===== VMA dirty summary helpers ===== */
 
-static void append_vma_summary(sample_t *sample, vma_info_t *vma, int dirty_pages) {
+/* Number of 4 MB IOV-aligned chunks needed to cover the VMA. Rounds up so the
+ * last chunk may be partial when (end - start) is not a CHUNK_BYTES multiple. */
+static int vma_chunk_count(const vma_info_t *vma) {
+    uint64_t bytes = vma->end - vma->start;
+    return (int)((bytes + CHUNK_BYTES - 1) / CHUNK_BYTES);
+}
+
+/* Map an absolute page address to its chunk index within the given VMA.
+ * Returns -1 if the page does not fall inside the VMA range. */
+static inline int chunk_idx_in_vma(const vma_info_t *vma, uint64_t addr) {
+    if (addr < vma->start || addr >= vma->end)
+        return -1;
+    return (int)((addr - vma->start) / CHUNK_BYTES);
+}
+
+/* Append a VMA summary entry with chunk-level dirty counts. The caller passes
+ * an optional chunk_dirty[] array (length = vma_chunk_count(vma)); if NULL the
+ * summary records only the total dirty count. The pointer is moved into the
+ * summary (sample takes ownership) so the caller must allocate via malloc. */
+static void append_vma_summary_chunked(sample_t *sample, vma_info_t *vma,
+                                       int dirty_pages,
+                                       uint16_t *chunk_dirty, int chunk_count) {
     if (sample->vma_summary_count >= sample->vma_summary_capacity) {
         int new_cap = sample->vma_summary_capacity ? sample->vma_summary_capacity * 2 : 128;
         vma_dirty_summary_t *tmp = realloc(sample->vma_summaries,
             new_cap * sizeof(vma_dirty_summary_t));
-        if (!tmp) return;  /* OOM: skip this VMA summary */
+        if (!tmp) {
+            free(chunk_dirty);
+            return;
+        }
         sample->vma_summaries = tmp;
         sample->vma_summary_capacity = new_cap;
     }
@@ -1436,6 +1490,13 @@ static void append_vma_summary(sample_t *sample, vma_info_t *vma, int dirty_page
     strncpy(vs->perms, vma->perms, sizeof(vs->perms) - 1);
     vs->perms[sizeof(vs->perms) - 1] = '\0';
     vs->vma_type = vma->type;
+    vs->chunk_dirty = chunk_dirty;
+    vs->chunk_count = chunk_count;
+}
+
+/* Backwards-compat wrapper: emit summary without chunk-level breakdown. */
+static void append_vma_summary(sample_t *sample, vma_info_t *vma, int dirty_pages) {
+    append_vma_summary_chunked(sample, vma, dirty_pages, NULL, 0);
 }
 
 /* ===== Dirty page scanning ===== */
@@ -1574,14 +1635,40 @@ static int read_dirty_pages_pagemap_scan(tracker_t *t, process_tracker_t *pt, sa
             continue;
         }
 
-        /* Count dirty pages for this VMA from regions (independent of page expansion) */
+        /* Count dirty pages for this VMA AND aggregate per CRIU IOV chunk
+         * (4 MB), so the analysis can apply hot-VMA classification at the
+         * granularity that lazy-restore prefetches and zstd-seekable
+         * frames operate on. */
         {
             int vma_dirty_count = 0;
+            int chunk_count = vma_chunk_count(vma);
+            uint16_t *chunk_dirty = NULL;
+            if (chunk_count > 0) {
+                chunk_dirty = calloc(chunk_count, sizeof(uint16_t));
+                /* OOM is non-fatal: fall back to VMA-level summary only. */
+            }
             for (long i = 0; i < ret; i++) {
                 if (!use_wp && !(t->regions[i].categories & PAGE_IS_SOFT_DIRTY)) continue;
-                vma_dirty_count += (t->regions[i].end - t->regions[i].start) / PAGE_SIZE;
+                long pages = (t->regions[i].end - t->regions[i].start) / PAGE_SIZE;
+                vma_dirty_count += pages;
+                if (chunk_dirty) {
+                    /* PAGEMAP_SCAN returns ranges sorted ascending and capped
+                     * at the VMA boundary, so we walk page-by-page inside the
+                     * range to bump the right chunk counter. The cost is
+                     * dominated by per-page work elsewhere; each bump is one
+                     * div + one increment. */
+                    for (uint64_t a = t->regions[i].start; a < t->regions[i].end;
+                         a += PAGE_SIZE) {
+                        int ci = chunk_idx_in_vma(vma, a);
+                        if (ci >= 0 && ci < chunk_count
+                            && chunk_dirty[ci] < UINT16_MAX) {
+                            chunk_dirty[ci]++;
+                        }
+                    }
+                }
             }
-            append_vma_summary(sample, vma, vma_dirty_count);
+            append_vma_summary_chunked(sample, vma, vma_dirty_count,
+                                        chunk_dirty, chunk_count);
         }
 
         /* Process returned regions - in WP mode all returned pages are dirty */
@@ -1684,12 +1771,26 @@ static int read_dirty_pages_soft_dirty(tracker_t *t, process_tracker_t *pt, samp
 
         size_t entries = n / sizeof(uint64_t);
 
-        /* Count dirty pages for VMA summary */
+        /* Count dirty pages and aggregate per IOV chunk (same scheme as the
+         * PAGEMAP_SCAN path so consumers get a uniform shape). */
         int vma_dirty_count = 0;
+        int chunk_count = vma_chunk_count(vma);
+        uint16_t *chunk_dirty = chunk_count > 0
+            ? calloc(chunk_count, sizeof(uint16_t)) : NULL;
         for (size_t i = 0; i < entries; i++) {
-            if (buf[i] & PM_SOFT_DIRTY) vma_dirty_count++;
+            if (!(buf[i] & PM_SOFT_DIRTY)) continue;
+            vma_dirty_count++;
+            if (chunk_dirty) {
+                uint64_t addr = vma->start + i * PAGE_SIZE;
+                int ci = chunk_idx_in_vma(vma, addr);
+                if (ci >= 0 && ci < chunk_count
+                    && chunk_dirty[ci] < UINT16_MAX) {
+                    chunk_dirty[ci]++;
+                }
+            }
         }
-        append_vma_summary(sample, vma, vma_dirty_count);
+        append_vma_summary_chunked(sample, vma, vma_dirty_count,
+                                    chunk_dirty, chunk_count);
 
         for (size_t i = 0; i < entries; i++) {
             if (buf[i] & PM_SOFT_DIRTY) {
@@ -2136,11 +2237,22 @@ static void flush_and_free_sample(tracker_t *t, sample_t *sample) {
         t->samples_written++;
     }
 
-    /* 5. Free sample memory */
+    /* 5. Free sample memory. vma_summaries[] ownership has been transferred
+     * to the timeline entry above when timeline allocation succeeded; in the
+     * fallback path (timeline OOM) we free here. The chunk_dirty arrays
+     * inside each summary are freed when the timeline entry itself is freed
+     * (see write_json_footer). */
     free(sample->pages);        sample->pages = NULL;
     free(sample->sd_pages);     sample->sd_pages = NULL;
     free(sample->pids_tracked); sample->pids_tracked = NULL;
-    free(sample->vma_summaries); sample->vma_summaries = NULL;
+    if (sample->vma_summaries) {
+        /* Timeline transfer didn't happen (OOM path) — also drop chunk_dirty. */
+        for (int v = 0; v < sample->vma_summary_count; v++) {
+            free(sample->vma_summaries[v].chunk_dirty);
+        }
+        free(sample->vma_summaries);
+        sample->vma_summaries = NULL;
+    }
 
     t->prev_timestamp_ms = sample->timestamp_ms;
 }
@@ -2235,10 +2347,24 @@ static void write_json_footer(tracker_t *t) {
             vma_dirty_summary_t *vs = &e->vma_summaries[v];
             fprintf(f, "{\"start\": \"0x%lx\", \"end\": \"0x%lx\", "
                        "\"dirty\": %d, \"total\": %d, "
-                       "\"perms\": \"%s\", \"type\": \"%s\"}",
+                       "\"perms\": \"%s\", \"type\": \"%s\"",
                     (unsigned long)vs->start, (unsigned long)vs->end,
                     vs->dirty_pages, vs->total_pages,
                     vs->perms, vma_type_str(vs->vma_type));
+            /* chunk_dirty[]: per-(VMA, chunk_idx) dirty count for hot
+             * classification at the CRIU IOV granularity (4 MB). Only
+             * emitted when the tracker captured chunk-level data (the
+             * fast PAGEMAP_SCAN and soft-dirty paths do; uffd_sync may
+             * not). */
+            if (vs->chunk_dirty && vs->chunk_count > 0) {
+                fprintf(f, ", \"chunk_dirty\": [");
+                for (int c = 0; c < vs->chunk_count; c++) {
+                    fprintf(f, "%u%s", vs->chunk_dirty[c],
+                            c < vs->chunk_count - 1 ? "," : "");
+                }
+                fprintf(f, "]");
+            }
+            fprintf(f, "}");
             if (v < e->vma_summary_count - 1) fprintf(f, ", ");
         }
         fprintf(f, "]}%s\n", i < t->timeline_count - 1 ? "," : "");
