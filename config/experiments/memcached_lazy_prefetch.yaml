@@ -10,7 +10,7 @@ checkpoint:
 
   strategy:
     mode: "full"
-    wait_before_dump: 60  # Wait 60s for YCSB load + run phase
+    wait_before_dump: 90  # Wait 90s — covers dataproc r24M init (11 GB random gen) + YCSB load phase
 
 transfer:
   method: "rsync"

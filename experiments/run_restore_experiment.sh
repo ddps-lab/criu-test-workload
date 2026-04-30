@@ -98,8 +98,15 @@ declare -A MODE_ARGS
 MODE_ARGS[1_baseline]="BASELINE_SPECIAL"
 MODE_ARGS[2_s3_lazy_only]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-semi-sync-iov --no-async-prefetch --no-hot-vma-seed"
 MODE_ARGS[3_semi_sync]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-async-prefetch --no-hot-vma-seed"
-MODE_ARGS[4_async]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-hot-vma-seed --prefetch-workers 12"
-MODE_ARGS[5_full]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --prefetch-workers 12"
+# PREFETCH_WORKERS env var overrides. Default = 16 — empirically optimal on
+# m5.8xlarge per v6 ablation (2026-04-22): libcurl saturates NIC at N=16
+# (97% of 10 Gbps), CRIU achieves its peak daemon-time reduction at w16
+# (mc-16gb COMP 5_full: 18.15 s → 13.49 s vs w12). Derivation:
+#   N* ≈ η·B_nic / R_conn = 0.97 × 1250 / 80 ≈ 16
+# See issues/phase6-compress-issue-update.md § Independent bench.
+PREFETCH_WORKERS="${PREFETCH_WORKERS:-16}"
+MODE_ARGS[4_async]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-hot-vma-seed --prefetch-workers ${PREFETCH_WORKERS}"
+MODE_ARGS[5_full]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --prefetch-workers ${PREFETCH_WORKERS}"
 
 # Default: skip 2_s3_lazy_only (much slower than baseline on real S3, run separately if needed)
 # Default: 1_baseline + 3_semi_sync + 4_async + 5_full. Override with env

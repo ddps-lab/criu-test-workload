@@ -87,14 +87,18 @@ case "$BACKEND" in
     *) echo "ERROR: backend '$BACKEND' not recognized"; exit 1 ;;
 esac
 
-# 6 workload subset for storage sweep (excludes mc-1/4/8/16gb).
+# Storage sweep workload set. mc-1/4/8/16gb entries reuse the dumps from
+# launch_experiment.sh's memory sweep (uploaded under memcached-{1,4,8,16}gb/).
 ALL_EXPERIMENTS=(
-    "matmul|matmul|matmul|--matrix-size 2048"
-    "dataproc|dataproc|dataproc|--num-rows 1500000 --num-cols 60 --batch-size 1000"
-    "ml-training|ml_training|ml-training|--model-size large --dataset-size 50000"
+    "matmul|matmul|matmul|--matrix-size 25000"
+    "dataproc|dataproc|dataproc|--num-rows 17000000 --num-cols 60 --batch-size 1000"
+    "ml-training|ml_training|ml-training|--model-size large --dataset-size 2000000"
     "xgboost|xgboost|xgboost|--dataset synthetic --num-samples 7000000 --num-features 100 --num-threads 3"
     "redis|redis|redis|--record-count 5000000 --ycsb-threads 4 --ycsb-workload a"
-    "mc-11gb|memcached|memcached|--memcached-memory 11264 --record-count 8500000 --ycsb-threads 4"
+    "mc-1gb|memcached|memcached-1gb|--memcached-memory 1024 --record-count 773000 --ycsb-threads 4"
+    "mc-4gb|memcached|memcached-4gb|--memcached-memory 4096 --record-count 3100000 --ycsb-threads 4"
+    "mc-8gb|memcached|memcached|--memcached-memory 8192 --record-count 6200000 --ycsb-threads 4 --ycsb-workload a"
+    "mc-16gb|memcached|memcached-16gb|--memcached-memory 16384 --record-count 12400000 --ycsb-threads 4"
 )
 
 if [ -n "$WORKLOAD_FILTER" ]; then

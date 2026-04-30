@@ -163,6 +163,15 @@ mkdir -p \$OUTDIR
 
 echo "=== [\$(date +%H:%M:%S)] page-server probe: \$WORKLOAD ==="
 
+# Bump ns_last_pid on BOTH source and dest so the workload gets PIDs > 10000.
+# Otherwise memcached+YCSB end up at ~1800-1850, and restore on dest collides
+# with dest's systemd/cloud-init processes in that range (Error: "Can't fork
+# for 1849: File exists" / "Unable to create a thread: -17"). Bumping past
+# 10000 on both sides avoids this class of collision entirely.
+sudo sh -c 'echo 10000 > /proc/sys/kernel/ns_last_pid' 2>/dev/null || true
+ssh -o StrictHostKeyChecking=no ubuntu@$DST_PRIV \\
+    "sudo sh -c 'echo 10000 > /proc/sys/kernel/ns_last_pid'" 2>/dev/null || true
+
 # duration=86400 keeps YCSB run alive past wall-clock; wait_before_dump=120
 # matches the standard restore experiment so the workload state is comparable.
 sudo -E python3 -u experiments/baseline_experiment.py \\

@@ -18,14 +18,19 @@ REGION="${EXPRESS_REGION:-us-west-2}"
 ENDPOINT="${EXPRESS_ENDPOINT:-https://s3express-usw2-az1.us-west-2.amazonaws.com}"
 
 # Storage sweep workloads (matches launch_storage_sweep.sh ALL_EXPERIMENTS).
-PREFIXES=(
-    matmul
-    dataproc
-    ml-training
-    xgboost
-    redis
-    memcached     # mc-11gb
-)
+# Override via PREFIXES env var (space-separated) to copy a subset.
+if [ -n "$PREFIXES_OVERRIDE" ]; then
+    read -r -a PREFIXES <<< "$PREFIXES_OVERRIDE"
+else
+    PREFIXES=(
+        matmul
+        dataproc
+        ml-training
+        xgboost
+        redis
+        memcached     # mc-11gb
+    )
+fi
 
 echo "Copying dumps from s3://$SRC_BUCKET/ → s3://$DST_BUCKET/"
 echo "  endpoint: $ENDPOINT"
