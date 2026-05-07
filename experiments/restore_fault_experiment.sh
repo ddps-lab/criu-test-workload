@@ -88,13 +88,14 @@ sudo -u ubuntu setsid python3 "$STANDALONE_SCRIPT" \
     --working_dir "$WORK_DIR" $EXTRA_ARGS \
     > "$LOG_DIR/workload.log" 2>&1 &
 disown $!
-log "waiting for checkpoint_ready ..."
-for _ in $(seq 1 600); do
+log "waiting for checkpoint_ready (up to 30 min for large YCSB loads) ..."
+for _ in $(seq 1 1800); do
   [[ -f "$WORK_DIR/checkpoint_ready" ]] && break
   sleep 1
 done
 [[ -f "$WORK_DIR/checkpoint_ready" ]] || { log "checkpoint_ready timeout"; exit 2; }
-WORKLOAD_PID=$(cat "$WORK_DIR/checkpoint_ready")
+# checkpoint_ready content is "ready:PID\n"
+WORKLOAD_PID=$(awk -F: '{print $NF}' "$WORK_DIR/checkpoint_ready" | tr -dc '0-9')
 log "workload PID=$WORKLOAD_PID"
 
 # 2. Warm-up

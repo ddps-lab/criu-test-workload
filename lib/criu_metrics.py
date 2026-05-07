@@ -30,9 +30,23 @@ def parse_lazy_pages_log(log_content: str) -> Dict[str, Any]:
         'pre_queue': [],
         'hot_vma': {},
         'daemon_duration_s': None,
+        'pageserver_fetches': [],
     }
 
     for line in log_content.split('\n'):
+        # Page-server stall instrumentation:
+        #   pageserver: FETCH_DONE iov=0xVADDR len=N dur_ms=X.XX src=fault|prefetch
+        m = re.search(
+            r'pageserver: FETCH_DONE iov=(0x[0-9a-fA-F]+) len=(\d+) dur_ms=([\d.]+) src=(\w+)',
+            line,
+        )
+        if m:
+            metrics['pageserver_fetches'].append({
+                'iov': int(m.group(1), 16),
+                'length': int(m.group(2)),
+                'duration_ms': float(m.group(3)),
+                'source': m.group(4),  # 'fault' or 'prefetch'
+            })
         # Extract timestamp from CRIU log format: (seconds.microseconds)
         ts_match = re.match(r'\((\d+\.\d+)\)', line)
 
@@ -242,6 +256,39 @@ def parse_lazy_pages_log(log_content: str) -> Dict[str, Any]:
             'total_hot': total_hot,
             'total_sequential': total_seq,
         }
+
+    # Page-server fetch summary (stall RTT per fault/prefetch)
+    if metrics['pageserver_fetches']:
+        all_f = metrics['pageserver_fetches']
+        fault_f = [f for f in all_f if f['source'] == 'fault']
+        prefetch_f = [f for f in all_f if f['source'] == 'prefetch']
+
+        def _stats(events):
+            if not events:
+                return None
+            durs = sorted(f['duration_ms'] for f in events)
+            n = len(durs)
+            return {
+                'count': n,
+                'dur_ms_avg': round(sum(durs) / n, 3),
+                'dur_ms_min': round(durs[0], 3),
+                'dur_ms_max': round(durs[-1], 3),
+                'dur_ms_p50': round(durs[n // 2], 3),
+                'dur_ms_p95': round(durs[min(int(n * 0.95), n - 1)], 3),
+                'total_bytes': sum(f['length'] for f in events),
+            }
+
+        metrics['pageserver_summary'] = {
+            'total': _stats(all_f),
+            'fault': _stats(fault_f),
+            'prefetch': _stats(prefetch_f),
+        }
+        # Top-level for ablation comparison parity with objstor stall_ms_avg
+        metrics['pageserver_stall_ms_avg'] = metrics['pageserver_summary']['total']['dur_ms_avg']
+        if fault_f:
+            metrics['pageserver_fault_stall_ms_avg'] = metrics['pageserver_summary']['fault']['dur_ms_avg']
+        if prefetch_f:
+            metrics['pageserver_prefetch_stall_ms_avg'] = metrics['pageserver_summary']['prefetch']['dur_ms_avg']
 
     return metrics
 

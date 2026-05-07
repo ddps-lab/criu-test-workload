@@ -17,7 +17,7 @@
 # Env: REPEAT (default 3), BUCKET, REGION, CRIU_SRC, MODES (e.g. "4_async 5_full")
 set -e
 
-AMI_ID="${AMI_ID:-ami-0697e5cc271d1da64}"  # criu-workload-v6-20260425
+AMI_ID="${AMI_ID:-ami-0f689eeba0a840177}"  # criu-workload-v9 (chunk_dirty tracker)
 INSTANCE_TYPE="m5.8xlarge"
 KEY_NAME="mhsong-ddps-oregon"
 SG="sg-0eb08e8fa10cb3031"
@@ -25,9 +25,12 @@ SUBNET="subnet-09c8aacd484cac3e2"
 IAM_PROFILE="mhsong-ec2-admin"
 REGION="us-west-2"
 SSH_KEY="$HOME/.ssh/mhsong-ddps-oregon.pem"
-REPEAT="${REPEAT:-3}"
+REPEAT="${REPEAT:-5}"
 CRIU_SRC="${CRIU_SRC:-/spot_kubernetes/criu_build/criu-s3}"
-BUCKET="${BUCKET:-mhsong-criu-checkpoints}"
+# Dumps now live in mhsong-criu-data-artifact under a `dump-perf/<wl>/`
+# layout. The default below + the `dump-perf/` prefix in workload_config
+# match the production dump pipeline (dump_all_workloads.sh writes here).
+BUCKET="${BUCKET:-mhsong-criu-data-artifact}"
 
 MODE_RAW=0
 MODE_COMP=0
@@ -70,15 +73,15 @@ AWS_SECRET=$(aws configure get aws_secret_access_key)
 # always uses the same dump artifact prefix the dump pipeline produced.
 workload_config() {
     case "$1" in
-        matmul)      echo "matmul|matmul|--matrix-size 25000" ;;
-        dataproc)    echo "dataproc|dataproc|--num-rows 17000000 --num-cols 60 --batch-size 1000" ;;
-        ml-training) echo "ml_training|ml-training|--model-size large --dataset-size 2000000" ;;
-        xgboost)     echo "xgboost|xgboost|--dataset synthetic --num-samples 7000000 --num-features 100 --num-threads 3" ;;
-        redis)       echo "redis|redis|--record-count 5000000 --ycsb-threads 4 --ycsb-workload a" ;;
-        mc-1gb)      echo "memcached|memcached-1gb|--memcached-memory 1024 --record-count 773000 --ycsb-threads 4" ;;
-        mc-4gb)      echo "memcached|memcached-4gb|--memcached-memory 4096 --record-count 3100000 --ycsb-threads 4" ;;
-        mc-8gb)      echo "memcached|memcached|--memcached-memory 8192 --record-count 6200000 --ycsb-threads 4 --ycsb-workload a" ;;
-        mc-16gb)     echo "memcached|memcached-16gb|--memcached-memory 16384 --record-count 12400000 --ycsb-threads 4" ;;
+        matmul)      echo "matmul|dump-perf/matmul|--matrix-size 25000" ;;
+        dataproc)    echo "dataproc|dump-perf/dataproc|--num-rows 17000000 --num-cols 60 --batch-size 1000" ;;
+        ml-training) echo "ml_training|dump-perf/ml-training|--model-size large --dataset-size 2000000" ;;
+        xgboost)     echo "xgboost|dump-perf/xgboost|--dataset synthetic --num-samples 7000000 --num-features 100 --num-threads 3" ;;
+        redis)       echo "redis|dump-perf/redis|--record-count 5000000 --ycsb-threads 4 --ycsb-workload a" ;;
+        mc-1gb)      echo "memcached|dump-perf/memcached-1gb|--memcached-memory 1024 --record-count 773000 --ycsb-threads 4" ;;
+        mc-4gb)      echo "memcached|dump-perf/memcached-4gb|--memcached-memory 4096 --record-count 3100000 --ycsb-threads 4" ;;
+        mc-8gb)      echo "memcached|dump-perf/memcached|--memcached-memory 8192 --record-count 6200000 --ycsb-threads 4 --ycsb-workload a" ;;
+        mc-16gb)     echo "memcached|dump-perf/memcached-16gb|--memcached-memory 16384 --record-count 12400000 --ycsb-threads 4" ;;
         *) return 1 ;;
     esac
 }
@@ -105,7 +108,7 @@ INSTANCE_IDS=$(aws ec2 run-instances \
     --count $N --key-name $KEY_NAME \
     --security-group-ids $SG --subnet-id $SUBNET \
     --iam-instance-profile Name=$IAM_PROFILE \
-    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":120,"VolumeType":"gp3"}}]' \
+    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":200,"VolumeType":"gp3"}}]' \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=criu-ablation}]" \
     --query 'Instances[*].InstanceId' --output text)
 
@@ -136,18 +139,32 @@ for i in $(seq 0 $((N - 1))); do
     IP=${IPS[$i]}
     IID=${IIDS[$i]}
 
+    # PREFIX = S3 dump prefix (where the dump lives). RAW_PREFIX is e.g.
+    # "dump-perf/memcached-16gb"; we tack on `-compressed` for the
+    # compressed variant since dumps live at sibling paths.
+    #
+    # RESULTS_DIR = the subdir name under the results bucket. Historically
+    # this was `${PREFIX_basename}_${SUFFIX}` (encoded inside
+    # run_restore_experiment.sh from --s3-prefix + --s3-results-suffix),
+    # which doubled the word "compressed" because both halves encoded the
+    # variant. Today we set it explicitly via --s3-results-prefix so the
+    # results path mirrors the artifact layout (`<wl>_raw/`,
+    # `<wl>_compressed/`).
+    WL_BASE=$(basename "$RAW_PREFIX")
     if [ "$MODE" = "compress" ]; then
         PREFIX="${RAW_PREFIX}-compressed"
-        SUFFIX="compressed"
+        VARIANT="compressed"
     else
         PREFIX="${RAW_PREFIX}"
-        SUFFIX="raw"
+        VARIANT="raw"
     fi
-    # Worker count embedded in results suffix (e.g. compressed-w16) so different
-    # PREFETCH_WORKERS sweeps coexist in the same results bucket.
+    RESULTS_DIR="${WL_BASE}_${VARIANT}"
+    # Worker count: keep the legacy `-w<N>` annotation on the results dir
+    # so prefetch-worker sweeps still produce distinct paths.
     if [ -n "$W" ]; then
-        SUFFIX="${SUFFIX}-w${W}"
+        RESULTS_DIR="${RESULTS_DIR}-w${W}"
     fi
+    SUFFIX="$VARIANT"
 
     echo ""
     echo "--- $WL ($MODE${W:+ w=$W}) on $IP ($IID) — prefix=$PREFIX → suffix=$SUFFIX ---"
@@ -156,10 +173,10 @@ for i in $(seq 0 $((N - 1))); do
     aws ec2 create-tags --region $REGION --resources $IID \
         --tags "Key=Experiment,Value=ablation-${WL}-${MODE}${W:+-w${W}}" 2>/dev/null || true
 
-    # Bootstrap
+    # Bootstrap (best-effort; AMI dir is not a git repo so this normally fails)
     ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$IP "
         cd /opt/criu_workload && git pull origin main -q
-    " 2>/dev/null
+    " 2>/dev/null || true
 
     echo "   uploading criu binary..."
     scp -i $SSH_KEY -o StrictHostKeyChecking=no \
@@ -196,12 +213,22 @@ for d in lib workloads experiments config tools; do
 done
 sudo chmod +x /opt/criu_workload/experiments/*.sh 2>/dev/null || true
 
+# Rebuild dirty_tracker — dev rsync may overwrite AMI prebuilt binary
+# with a stale build (pre-04-30 had no chunk_dirty emit).
+echo "=== rebuild dirty_tracker (chunk_dirty emit) ==="
+(cd /opt/criu_workload/tools/dirty_tracker_c && make clean && make -j) 2>&1 | tail -3
+strings /opt/criu_workload/tools/dirty_tracker_c/dirty_tracker | grep -q chunk_dirty \\
+    && echo "  chunk_dirty emit: ON" \\
+    || { echo "  ERROR: chunk_dirty NOT in tracker — abort"; exit 1; }
+
 echo "=== [\$(date +%H:%M:%S)] ablation: ${WL} (${MODE}${W:+ w=${W}}) against s3://${BUCKET}/${PREFIX}/ ==="
 MODES='${MODES:-}' PREFETCH_WORKERS='${W}' bash experiments/run_restore_experiment.sh \\
     --workload ${WTYPE} \\
+    --s3-bucket ${BUCKET} \\
     --s3-prefix ${PREFIX} \\
     --repeat ${REPEAT} \\
     --extra-args '${EXTRA_ARGS}' \\
+    --s3-results-prefix ${RESULTS_DIR} \\
     --s3-results-suffix ${SUFFIX} \\
     --auto-terminate \\
     > /tmp/ablation.log 2>&1

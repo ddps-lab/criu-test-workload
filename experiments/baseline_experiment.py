@@ -390,6 +390,12 @@ def parse_args():
         default=None,
         help='Bucket for CRIU download (default: same as upload bucket)'
     )
+    s3_group.add_argument(
+        '--s3-restore-cdn-endpoint',
+        type=str,
+        default=None,
+        help='Optional CDN endpoint used by criu restore only (eager + metadata). Lazy-pages daemon stays on --s3-download-endpoint. e.g. https://dxxxx.cloudfront.net'
+    )
 
     # Express One Zone specific
     s3_group.add_argument(
@@ -723,6 +729,8 @@ def build_overrides(args) -> dict:
         overrides['s3.region'] = args.s3_region
     if args.s3_download_endpoint:
         overrides['s3.download_endpoint'] = args.s3_download_endpoint
+    if args.s3_restore_cdn_endpoint:
+        overrides['s3.restore_cdn_endpoint'] = args.s3_restore_cdn_endpoint
     if args.s3_download_bucket:
         overrides['s3.download_bucket'] = args.s3_download_bucket
     if args.s3_access_key:
@@ -844,30 +852,51 @@ def main():
 
             print("=" * 60)
 
-            # Collect CRIU-level metrics from lazy-pages and restore logs
-            # Wait for lazy-pages daemon to finish (it exits after all pages are served)
-            # Timeout: 600s (11GB memcached on real S3 can take 400s+)
-            DAEMON_TIMEOUT = 600
+            # Collect CRIU-level metrics from lazy-pages and restore logs.
+            # Wait for lazy-pages daemon to finish (it exits naturally after
+            # all pages are drained by prefetch + on-demand fault handling).
+            # Cap: DAEMON_TIMEOUT seconds (default 3600 = 1h). Override with
+            # env CRIU_DAEMON_TIMEOUT_SEC to extend or shorten.
+            #
+            # Implementation: wall-clock-based polling. Earlier `range(N)`
+            # was a bug — each iteration takes ~3s (ssh+sleep) so range(600)
+            # waited ~28 min, not 600s. We now compare time.time() against a
+            # deadline so cap is faithful regardless of polling cost.
+            import os as _os
+            DAEMON_TIMEOUT = int(_os.environ.get('CRIU_DAEMON_TIMEOUT_SEC', '3600'))
+            POLL_INTERVAL = 5  # seconds between pgrep polls
             ssh_user = experiment.nodes_config.get('ssh_user', 'ubuntu')
             checkpoint_dir = experiment.final_checkpoint_dir
             lazy_mode = experiment.config.get('checkpoint', {}).get('strategy', {}).get('lazy_mode', 'none')
             daemon_completed = True
+            daemon_wait_elapsed = 0.0
             if lazy_mode not in ('none',):
                 import subprocess as _sp
-                logger.info(f"Waiting up to {DAEMON_TIMEOUT}s for lazy-pages daemon to complete...")
-                for i in range(DAEMON_TIMEOUT):
+                logger.info(f"Waiting up to {DAEMON_TIMEOUT}s for lazy-pages daemon to complete (poll every {POLL_INTERVAL}s)...")
+                wait_start = time.time()
+                deadline = wait_start + DAEMON_TIMEOUT
+                while True:
                     ret = _sp.run(
                         f"ssh -o StrictHostKeyChecking=no {ssh_user}@{experiment.dest_host} "
                         f"'pgrep -x criu'",
-                        shell=True, capture_output=True, timeout=5
+                        shell=True, capture_output=True, timeout=10
                     )
+                    daemon_wait_elapsed = time.time() - wait_start
                     if ret.returncode != 0:
-                        logger.info(f"lazy-pages daemon exited after {i}s")
+                        logger.info(f"lazy-pages daemon exited after {daemon_wait_elapsed:.1f}s (natural drain)")
                         break
-                    time.sleep(1)
-                else:
-                    logger.warning(f"lazy-pages daemon did not exit within {DAEMON_TIMEOUT}s")
-                    daemon_completed = False
+                    if time.time() >= deadline:
+                        logger.warning(f"lazy-pages daemon did not exit within {DAEMON_TIMEOUT}s — CAP HIT, daemon still running")
+                        daemon_completed = False
+                        break
+                    time.sleep(POLL_INTERVAL)
+                # Annotate result with cap-hit info so downstream tooling
+                # can distinguish drained vs cap-truncated runs.
+                result.setdefault('metrics', {})['daemon_wait'] = {
+                    'cap_sec': DAEMON_TIMEOUT,
+                    'elapsed_sec': daemon_wait_elapsed,
+                    'cap_hit': not daemon_completed,
+                }
             try:
                 # Collect from dest (restore/lazy-pages logs)
                 criu_metrics_dest = collect_criu_metrics(

@@ -18,7 +18,7 @@
 # Env: REPEAT (default 5), AMI_ID, BUCKET, REGION
 set -e
 
-AMI_ID="${AMI_ID:-ami-0697e5cc271d1da64}"  # criu-workload-v6-20260425
+AMI_ID="${AMI_ID:-ami-0f689eeba0a840177}"  # criu-workload-v9 (chunk_dirty tracker)
 INSTANCE_TYPE="m5.8xlarge"
 KEY_NAME="mhsong-ddps-oregon"
 SG="sg-0eb08e8fa10cb3031"
@@ -28,6 +28,7 @@ REGION="us-west-2"
 SSH_KEY="$HOME/.ssh/mhsong-ddps-oregon.pem"
 REPEAT="${REPEAT:-5}"
 BUCKET="${BUCKET:-mhsong-criu-results}"
+CRIU_SRC="${CRIU_SRC:-/spot_kubernetes/criu_build/criu-s3}"
 WORKLOADS=()
 
 while [[ $# -gt 0 ]]; do
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [ ${#WORKLOADS[@]} -gt 0 ] || { echo "ERROR: provide --all or one or more workloads"; exit 1; }
+[ -x "${CRIU_SRC}/criu/criu" ] || { echo "ERROR: ${CRIU_SRC}/criu/criu not built"; exit 1; }
 
 AWS_KEY=$(aws configure get aws_access_key_id)
 AWS_SECRET=$(aws configure get aws_secret_access_key)
@@ -65,6 +67,7 @@ N=${#WORKLOADS[@]}
 echo "=========================================="
 echo " Page-server ablation: $N workloads, REPEAT=$REPEAT"
 echo " AMI: $AMI_ID"
+echo " criu: ${CRIU_SRC}/criu/criu ($(${CRIU_SRC}/criu/criu --version 2>&1 | grep -i gitid))"
 echo " (each pair = 2 m5.8xlarge instances)"
 for w in "${WORKLOADS[@]}"; do echo "   $w"; done
 echo "=========================================="
@@ -76,7 +79,7 @@ INSTANCE_IDS=$(aws ec2 run-instances \
     --count $TOTAL --key-name $KEY_NAME \
     --security-group-ids $SG --subnet-id $SUBNET \
     --iam-instance-profile Name=$IAM_PROFILE \
-    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":120,"VolumeType":"gp3"}}]' \
+    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":200,"VolumeType":"gp3"}}]' \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=criu-pageserver}]" \
     --query 'Instances[*].InstanceId' --output text)
 
@@ -158,8 +161,13 @@ EOF
     ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$DST_IP "echo '$SRC_PUB' >> ~/.ssh/authorized_keys"
     ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$SRC_IP "echo '$DST_PUB' >> ~/.ssh/authorized_keys"
 
-    # Sync the workload tree to BOTH sides (rsync pattern from launch_dump.sh).
+    # Sync the workload tree + dev-VM CRIU binary to BOTH sides
+    # (mirrors launch_dump.sh). The page-server fault-stall instrumentation
+    # lives in the dev-VM build, so we install it over the AMI's stock
+    # /usr/local/sbin/criu before each repeat begins.
     for ip in $SRC_IP $DST_IP; do
+        scp -i $SSH_KEY -o StrictHostKeyChecking=no \
+            "${CRIU_SRC}/criu/criu" ubuntu@$ip:/tmp/criu.dev >/dev/null
         rsync -a -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
             --exclude '__pycache__' --exclude '*.pyc' --exclude '.git' \
             /spot_kubernetes/criu_workload/lib \
@@ -178,6 +186,10 @@ set +e
 export AWS_ACCESS_KEY_ID='${AWS_KEY}'
 export AWS_SECRET_ACCESS_KEY='${AWS_SECRET}'
 
+echo "=== install criu (dev binary with page-server stall instrumentation) ==="
+sudo install -m 0755 /tmp/criu.dev /usr/local/sbin/criu
+/usr/local/sbin/criu --version
+
 echo "=== install criu_workload tree (lib workloads experiments config tools) ==="
 for d in lib workloads experiments config tools; do
     if [ -d /tmp/criu_workload_sync/\$d ]; then
@@ -189,8 +201,12 @@ cd /opt/criu_workload
 
 # Mirror the same install on the destination (driver is on source but
 # baseline_experiment.py paramiko-deploys workload code via SFTP; we
-# still want the standalone scripts present on dest).
+# still want the standalone scripts present on dest). Install the same
+# dev CRIU binary on dst so its lazy-pages daemon emits the matching
+# pageserver: FETCH_DONE log lines.
 ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} "
+    sudo install -m 0755 /tmp/criu.dev /usr/local/sbin/criu
+    /usr/local/sbin/criu --version
     sudo rsync -a --chown=ubuntu:ubuntu /tmp/criu_workload_sync/lib/ /opt/criu_workload/lib/
     sudo rsync -a --chown=ubuntu:ubuntu /tmp/criu_workload_sync/workloads/ /opt/criu_workload/workloads/
     sudo rsync -a --chown=ubuntu:ubuntu /tmp/criu_workload_sync/experiments/ /opt/criu_workload/experiments/

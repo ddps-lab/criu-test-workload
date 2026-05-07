@@ -24,7 +24,8 @@ S3_RESULTS_BUCKET="mhsong-criu-results"
 S3_REGION="us-west-2"
 S3_ENDPOINT="https://s3.us-west-2.amazonaws.com"
 S3_TYPE="standard"           # standard | express-one-zone | cloudfront
-RESULTS_SUFFIX=""            # tag appended to results timestamp dir
+RESULTS_SUFFIX=""            # tag appended to results timestamp dir (legacy)
+RESULTS_PREFIX_OVERRIDE=""   # if set, used as the full results subdir name
 AUTO_TERMINATE=0
 
 while [[ $# -gt 0 ]]; do
@@ -40,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         --s3-type)              S3_TYPE="$2"; shift 2 ;;
         --s3-results)           S3_RESULTS_BUCKET="$2"; shift 2 ;;
         --s3-results-suffix)    RESULTS_SUFFIX="$2"; shift 2 ;;
+        --s3-results-prefix)    RESULTS_PREFIX_OVERRIDE="$2"; shift 2 ;;
         --auto-terminate)       AUTO_TERMINATE=1; shift ;;
         *)                      echo "Unknown: $1"; exit 1 ;;
     esac
@@ -57,7 +59,9 @@ if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
 fi
 
 _TS=$(date +%Y%m%d_%H%M%S)
-if [ -n "$RESULTS_SUFFIX" ]; then
+if [ -n "$RESULTS_PREFIX_OVERRIDE" ]; then
+    OUTDIR="/tmp/results/${RESULTS_PREFIX_OVERRIDE}_${_TS}"
+elif [ -n "$RESULTS_SUFFIX" ]; then
     OUTDIR="/tmp/results/${S3_PREFIX}_${RESULTS_SUFFIX}_${_TS}"
 else
     OUTDIR="/tmp/results/${S3_PREFIX}_${_TS}"
@@ -339,7 +343,17 @@ echo "=========================================="
 echo " Uploading results to S3"
 echo "=========================================="
 
-if [ -n "$RESULTS_SUFFIX" ]; then
+# Results subdir naming.
+#   1. --s3-results-prefix <name>: full override, used as-is (preferred for
+#      new launchers that want clean naming). Caller is responsible for
+#      uniqueness across (workload, variant) combos.
+#   2. legacy fallback: ${S3_PREFIX}_${RESULTS_SUFFIX}. This historically
+#      doubled "compressed" when both halves encoded the variant
+#      (`<wl>-compressed_compressed/`); kept here only for backwards
+#      compatibility with older launchers.
+if [ -n "$RESULTS_PREFIX_OVERRIDE" ]; then
+    RESULTS_PREFIX="${RESULTS_PREFIX_OVERRIDE}/$(date +%Y%m%d_%H%M%S)"
+elif [ -n "$RESULTS_SUFFIX" ]; then
     RESULTS_PREFIX="${S3_PREFIX}_${RESULTS_SUFFIX}/$(date +%Y%m%d_%H%M%S)"
 else
     RESULTS_PREFIX="${S3_PREFIX}/$(date +%Y%m%d_%H%M%S)"

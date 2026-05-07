@@ -1309,8 +1309,15 @@ class CheckpointManager:
             # Add lazy-pages option to restore command
             criu_cmd_parts.extend(lazy_config.get_restore_args())
 
-            # Add object storage options to restore command
-            criu_cmd_parts.extend(s3_config.get_criu_object_storage_args())
+            # Add object storage options to restore command. Use CDN
+            # endpoint here when one is configured — only the criu restore
+            # process (eager pagemap walk + metadata fetch) routes through
+            # the CDN; the lazy-pages daemon already started above stayed
+            # on the direct S3 endpoint to avoid paying CDN egress for the
+            # bulk lazy fetch.
+            criu_cmd_parts.extend(
+                s3_config.get_criu_object_storage_args(use_cdn=True)
+            )
 
         criu_cmd = " ".join(criu_cmd_parts)
 

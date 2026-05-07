@@ -17,7 +17,7 @@
 #   AMI_ID (default v4 kernel-6.8 AMI), CRIU_SRC (default dev path), SSH_KEY
 set -e
 
-AMI_ID="${AMI_ID:-ami-0697e5cc271d1da64}"  # criu-workload-v6-20260425
+AMI_ID="${AMI_ID:-ami-0f689eeba0a840177}"  # criu-workload-v9 (chunk_dirty tracker)
 INSTANCE_TYPE="m5.8xlarge"
 KEY_NAME="mhsong-ddps-oregon"
 SG="sg-0eb08e8fa10cb3031"
@@ -30,7 +30,7 @@ BUCKET="${BUCKET:-mhsong-criu-checkpoints}"
 
 MODE_RAW=0
 MODE_COMP=0
-REPEAT=1
+REPEAT="${REPEAT:-5}"
 WORKLOADS=()
 
 while [[ $# -gt 0 ]]; do
@@ -75,7 +75,7 @@ INSTANCE_IDS=$(aws ec2 run-instances \
     --count $N --key-name $KEY_NAME \
     --security-group-ids $SG --subnet-id $SUBNET \
     --iam-instance-profile Name=$IAM_PROFILE \
-    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":120,"VolumeType":"gp3"}}]' \
+    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":200,"VolumeType":"gp3"}}]' \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=criu-dump}]" \
     --query 'Instances[*].InstanceId' --output text)
 
@@ -167,6 +167,15 @@ for d in lib workloads experiments config tools; do
 done
 # Make experiments scripts executable
 sudo chmod +x /opt/criu_workload/experiments/*.sh 2>/dev/null || true
+
+# Rebuild dirty_tracker from synced source — the dev rsync may have
+# overwritten the AMI's prebuilt binary with a stale one (chunk_dirty
+# emit was missing in the pre-04-30 build).
+echo "=== rebuild dirty_tracker (chunk_dirty emit) ==="
+(cd /opt/criu_workload/tools/dirty_tracker_c && make clean && make -j) 2>&1 | tail -3
+strings /opt/criu_workload/tools/dirty_tracker_c/dirty_tracker | grep -q chunk_dirty \\
+    && echo "  chunk_dirty emit: ON" \\
+    || { echo "  ERROR: chunk_dirty NOT in tracker — abort"; exit 1; }
 
 echo "=== [\$(date +%H:%M:%S)] dump: ${WL} ${MODE} (repeat x${REPEAT}) ==="
 bash experiments/dump_all_workloads.sh \\

@@ -53,6 +53,9 @@ log.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 PAGE_SIZE = 4096
 PAGEMAP_MAGIC = 1443381285  # from criu/lib/pycriu/images/magic.py
+PE_PARENT  = 1 << 0  # pages live in parent snapshot, not in this pages-N.img
+PE_LAZY    = 1 << 1  # pages can be deferred to lazy-pages daemon
+PE_PRESENT = 1 << 2  # pages are physically present in pages-N.img
 
 # Shared pool reused across threads. One TCP stream per host + keep-alive
 # dramatically reduces cold-warming overhead vs. new connections per GET.
@@ -159,11 +162,18 @@ def _list_prefix(bucket: str, prefix: str):
     return keys
 
 
-def build_plan(bucket: str, prefix: str):
+def build_plan(bucket: str, prefix: str, eager_only: bool = False):
     """Return (iov_fetches, meta_fetches).
 
-    iov_fetches = [(key, offset, length)]  — Range GETs inside pages-*.img
-    meta_fetches = [(key, size)]           — whole-object GETs (small files)
+    iov_fetches  = [(key, offset, length)]  — Range GETs inside pages-*.img
+    meta_fetches = [(key, size)]            — whole-object GETs (small files)
+
+    eager_only=True: only warm IOVs that cr-restore reads on the eager
+    walk (PE_PRESENT && !PE_LAZY && !PE_PARENT). Pages flagged PE_LAZY
+    are deferred to the lazy-pages daemon, which the caller can route
+    directly to S3 instead of CloudFront — cutting CDN egress cost from
+    "all of memory" to "the few % cr-restore actually consults during
+    its synchronous startup".
     """
     all_keys = _list_prefix(bucket, prefix)
     by_base = {k.rsplit("/", 1)[-1]: (k, s) for k, s in all_keys}
@@ -174,6 +184,7 @@ def build_plan(bucket: str, prefix: str):
     )
     iov_fetches = []
     pages_ids_seen = {}
+    skipped_lazy_pages = 0
     for pm_key, _ in pagemap_keys:
         body = _s3.get_object(Bucket=bucket, Key=pm_key)["Body"].read()
         pages_id, entries = parse_pagemap(body)
@@ -183,22 +194,41 @@ def build_plan(bucket: str, prefix: str):
         if pages_basename not in by_base:
             raise ValueError(f"{pages_key} referenced by {pm_key} missing from prefix")
         offset = 0
-        for _, nr_pages, in_parent, _ in entries:
+        for _, nr_pages, in_parent, flags in entries:
             length = nr_pages * PAGE_SIZE
             if in_parent:
+                # No bytes in this pages-*.img; offset does not advance.
+                continue
+            if eager_only and flags is not None and (flags & PE_LAZY):
+                # Lazy-marked: bytes ARE in pages-*.img and contribute to
+                # offset, but cr-restore won't fetch them. Skip warming.
+                offset += length
+                skipped_lazy_pages += nr_pages
                 continue
             iov_fetches.append((pages_key, offset, length))
             offset += length
         pages_ids_seen.setdefault(pages_id, 0)
         pages_ids_seen[pages_id] += len(entries)
+    if eager_only:
+        log.info("eager_only: skipped %d lazy pages (%.1f MB)",
+                 skipped_lazy_pages, skipped_lazy_pages * PAGE_SIZE / 1024 / 1024)
 
-    # Meta fetches: everything that isn't a pages-*.img (including the
-    # pagemap files themselves, which need to be cached for the restore-side
-    # daemon to bootstrap). We use whole-object GETs because each is small.
-    meta_fetches = [
-        (k, s) for k, s in all_keys
-        if not k.rsplit("/", 1)[-1].startswith("pages-")
-    ]
+    # Meta fetches: every CRIU image file at the top level of the prefix
+    # that isn't a pages-*.img. CRIU restore looks up files at exactly
+    # `<prefix>/<basename>` — anything in a subdirectory (e.g.
+    # `dump-perf/<wl>/dump-metrics/repeat-1/dirty_pattern.json`) is dump
+    # tooling output, not consumed by restore, and must not be warmed
+    # (those JSONs are 100s of MB each).
+    norm_prefix = prefix.rstrip("/") + "/"
+    meta_fetches = []
+    for k, s in all_keys:
+        rel = k[len(norm_prefix):] if k.startswith(norm_prefix) else k
+        if "/" in rel:
+            # nested under a subdir → not a CRIU image
+            continue
+        if rel.startswith("pages-"):
+            continue
+        meta_fetches.append((k, s))
     return iov_fetches, meta_fetches, pages_ids_seen
 
 
@@ -259,12 +289,60 @@ def _warm_whole(distribution: str, key: str):
 
 # ----- main runners -------------------------------------------------------
 
-def _run(distribution: str, iov_fetches, meta_fetches, concurrency: int):
+def _warm_list(distribution: str, prefix: str):
+    """
+    Issue ListObjectsV2 against the CDN to populate its query-string-keyed
+    cache entry. CRIU's obstor_prefetch_init does the same LIST when it
+    initializes; if the distribution caches it, that LIST becomes a hit
+    and saves one cross-region S3 round trip per restore. The CDN must be
+    configured to forward query strings (cache policy with
+    QueryStringBehavior=all) and the bucket policy must allow
+    s3:ListBucket via the OAC; otherwise this just falls through to a
+    miss.
+
+    The query-string ordering AND prefix percent-encoding here must match
+    CRIU's _list_objects_v2_once exactly (`list-type=2&max-keys=1000&prefix=<%2F-encoded>`)
+    — CDN cache keys are exact strings, so any difference makes the warm
+    invisible to the restore-side LIST.
+    """
+    from urllib.parse import quote
+    norm = prefix.rstrip("/") + "/"
+    encoded_prefix = quote(norm, safe="")  # match CRIU's _sigv4_uri_encode (slashes encoded)
+    qs = f"list-type=2&max-keys=1000&prefix={encoded_prefix}"
+    url = f"https://{distribution}/?{qs}"
+    start = time.monotonic()
+    try:
+        resp = _http.request("GET", url, preload_content=False, redirect=False)
+    except Exception as e:
+        return {"key": "_LIST_", "status": 0, "error": str(e),
+                "elapsed_ms": (time.monotonic() - start) * 1000.0}
+    got = 0
+    try:
+        for chunk in resp.stream(64 * 1024):
+            got += len(chunk)
+    finally:
+        resp.release_conn()
+    return {
+        "key": "_LIST_",
+        "status": resp.status,
+        "x_cache": resp.headers.get("X-Cache"),
+        "x_amz_cf_pop": resp.headers.get("X-Amz-Cf-Pop"),
+        "bytes": got,
+        "elapsed_ms": round((time.monotonic() - start) * 1000.0, 2),
+    }
+
+
+def _run(distribution: str, iov_fetches, meta_fetches, concurrency: int,
+         prefix: str = None):
     results = []
     errors = []
     t0 = time.monotonic()
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futs = []
+        # Warm the CDN's LIST cache too — CRIU issues this exact query
+        # during obstor_prefetch_init.
+        if prefix:
+            futs.append(pool.submit(_warm_list, distribution, prefix))
         for key, size in meta_fetches:
             futs.append(pool.submit(_warm_whole, distribution, key))
         for key, off, length in iov_fetches:
@@ -366,6 +444,7 @@ def lambda_handler(event, _context):
     prefix = event.get("prefix")
     concurrency = int(event.get("concurrency", 16))
     mode = event.get("mode", "run")
+    eager_only = bool(event.get("eager_only", False))
 
     iov_override = event.get("iov_override")
     meta_override = event.get("meta_override")
@@ -376,7 +455,7 @@ def lambda_handler(event, _context):
     else:
         if not bucket or not prefix:
             raise ValueError("bucket + prefix required unless iov_override provided")
-        iov_fetches, meta_fetches, pages_ids = build_plan(bucket, prefix)
+        iov_fetches, meta_fetches, pages_ids = build_plan(bucket, prefix, eager_only=eager_only)
 
     log.info("plan: iov=%d meta=%d mode=%s concurrency=%d",
              len(iov_fetches), len(meta_fetches), mode, concurrency)
@@ -388,7 +467,8 @@ def lambda_handler(event, _context):
         result = _dispatch(fn_name, region, distribution, bucket, prefix,
                            iov_fetches, meta_fetches, shard_count, concurrency)
     else:
-        result = _run(distribution, iov_fetches, meta_fetches, concurrency)
+        result = _run(distribution, iov_fetches, meta_fetches, concurrency,
+                      prefix=prefix)
 
     if pages_ids is not None:
         result["pages_ids"] = pages_ids

@@ -63,6 +63,12 @@ class S3Config:
     # MinIO / path-style
     path_style: bool = False
 
+    # Optional CDN/CloudFront endpoint used ONLY by criu restore (eager
+    # walk + metadata fetch). Lazy-pages daemon stays on download_endpoint
+    # (S3 direct) so workload-driven faults don't pay CDN egress for the
+    # bulk of memory. When unset, both processes use download_endpoint.
+    restore_cdn_endpoint: str = ""
+
     def __post_init__(self):
         """Validate and normalize configuration."""
         # Convert string types to enum if needed
@@ -189,9 +195,15 @@ class S3Config:
 
         return args
 
-    def get_criu_object_storage_args(self) -> List[str]:
+    def get_criu_object_storage_args(self, use_cdn: bool = False) -> List[str]:
         """
         Generate CRIU object storage arguments for restore.
+
+        Args:
+            use_cdn: when True and restore_cdn_endpoint is set, use that
+                endpoint instead of download_endpoint. This lets criu
+                restore (eager + metadata) hit a CDN while criu lazy-pages
+                stays on direct S3.
 
         Returns:
             List of CRIU command line arguments
@@ -199,11 +211,26 @@ class S3Config:
         args = ["--enable-object-storage"]
 
         # Endpoint URL
+        endpoint = self.download_endpoint
+        cdn_active = bool(use_cdn and self.restore_cdn_endpoint)
+        if cdn_active:
+            endpoint = self.restore_cdn_endpoint
         args.append(f"--object-storage-endpoint-url")
-        args.append(self.download_endpoint)
+        args.append(endpoint)
 
-        # Bucket (not needed for CloudFront)
-        if self.s3_type != S3Type.CLOUDFRONT and self.download_bucket:
+        # Bucket: CRIU treats bucket as a virtual-host prefix, prepending
+        # it to the endpoint hostname. That's correct for raw S3 but wrong
+        # for a CloudFront distribution whose origin is *already* the
+        # specific S3 bucket — appending another bucket prefix yields
+        # `<bucket>.<dist>.cloudfront.net`, which doesn't resolve.
+        # Drop the bucket arg whenever the CDN endpoint is active or the
+        # configured S3Type is CLOUDFRONT. (When CDN is active CRIU's
+        # ListObjectsV2 also goes through the same endpoint, so the
+        # CloudFront distribution must be configured to forward the
+        # list-type=2 query and to allow s3:ListBucket via OAC — see
+        # cf_warmer's deploy notes.)
+        if (self.s3_type != S3Type.CLOUDFRONT and not cdn_active
+                and self.download_bucket):
             args.append("--object-storage-bucket")
             args.append(self.download_bucket)
 
@@ -266,6 +293,7 @@ class S3Config:
             access_key=config.get('access_key', ''),
             secret_key=config.get('secret_key', ''),
             path_style=config.get('path_style', False),
+            restore_cdn_endpoint=config.get('restore_cdn_endpoint', ''),
         )
 
     def to_dict(self) -> dict:

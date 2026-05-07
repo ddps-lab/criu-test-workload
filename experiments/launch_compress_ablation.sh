@@ -24,7 +24,7 @@
 
 set -e
 
-AMI_ID="${AMI_ID:-ami-0fd8cddbe746f93aa}"    # v4 AMI (kernel 6.8)
+AMI_ID="${AMI_ID:-ami-0f689eeba0a840177}"  # criu-workload-v9 (chunk_dirty tracker)
 INSTANCE_TYPE="m5.8xlarge"
 KEY_NAME="mhsong-ddps-oregon"
 SG="sg-0eb08e8fa10cb3031"
@@ -32,7 +32,7 @@ SUBNET="subnet-09c8aacd484cac3e2"
 IAM_PROFILE="mhsong-ec2-admin"
 REGION="us-west-2"
 SSH_KEY="$HOME/.ssh/mhsong-ddps-oregon.pem"
-REPEAT="${REPEAT:-3}"
+REPEAT="${REPEAT:-5}"
 CRIU_SRC="${CRIU_SRC:-/spot_kubernetes/criu_build/criu-s3}"
 
 [ -x "${CRIU_SRC}/criu/criu" ] || { echo "ERROR: ${CRIU_SRC}/criu/criu not built"; exit 1; }
