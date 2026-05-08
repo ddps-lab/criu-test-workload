@@ -193,6 +193,7 @@ class MLTrainingWorkload(BaseWorkload):
         self.learning_rate = config.get('learning_rate', 0.001)
         self.duration = config.get('duration', 0)
         self.dataset_size = config.get('dataset_size', None)
+        self.step_log_interval = config.get('step_log_interval', 100)
 
     def get_standalone_script_name(self) -> str:
         return 'ml_training_standalone.py'
@@ -205,6 +206,7 @@ class MLTrainingWorkload(BaseWorkload):
         cmd += f" --epochs {self.epochs}"
         cmd += f" --learning-rate {self.learning_rate}"
         cmd += f" --duration {self.duration}"
+        cmd += f" --step-log-interval {self.step_log_interval}"
         cmd += f" --working_dir {self.working_dir}"
         if self.dataset_size is not None:
             cmd += f" --dataset-size {self.dataset_size}"

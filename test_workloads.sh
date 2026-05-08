@@ -155,16 +155,13 @@ else
     RESULTS="$RESULTS\nSKIP: ml_training (no torch)"
 fi
 
-# 6. Video (ffmpeg)
-test_workload "video" "workloads/video_standalone.py" "--resolution 320x240 --fps 10" || true
-
-# 7. DataProc
+# 6. DataProc
 test_workload "dataproc" "workloads/dataproc_standalone.py" "--num-rows 10000 --num-cols 10" || true
 
-# 8. XGBoost
+# 7. XGBoost
 test_workload "xgboost" "workloads/xgboost_standalone.py" "--dataset synthetic --num-samples 5000 --num-features 10 --num-rounds 100" || true
 
-# 9. Memcached (YCSB mode) - skip if no YCSB
+# 8. Memcached (YCSB mode) - skip if no YCSB
 if [ -d "/opt/ycsb" ]; then
     test_workload "memcached" "workloads/memcached_standalone.py" "--port 11212 --memory-mb 64 --ycsb-workload a --ycsb-home /opt/ycsb --record-count 1000" || true
 else
@@ -173,9 +170,6 @@ else
     SKIP=$((SKIP + 1))
     RESULTS="$RESULTS\nSKIP: memcached (no YCSB)"
 fi
-
-# 10. 7zip
-test_workload "7zip" "workloads/sevenzip_standalone.py" "--compression-level 5 --input-size-mb 16 --threads 1" || true
 
 echo ""
 echo ""

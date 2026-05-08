@@ -175,7 +175,6 @@ ssh -o StrictHostKeyChecking=no ubuntu@$DST_PRIV \\
 # duration=86400 keeps YCSB run alive past wall-clock; wait_before_dump=120
 # matches the standard restore experiment so the workload state is comparable.
 sudo -E python3 -u experiments/baseline_experiment.py \\
-    --config config/experiments/memcached_lazy_prefetch.yaml \\
     --source-ip $SRC_PRIV --dest-ip $DST_PRIV \\
     --ssh-user ubuntu --workload \$WORKLOAD \\
     --lazy-mode live-migration \\

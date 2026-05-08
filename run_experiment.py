@@ -13,9 +13,6 @@ Usage:
 
     # Run with explicit IPs
     python3 run_experiment.py --source-ip 10.0.1.10 --dest-ip 10.0.1.11
-
-    # Run with a specific config
-    python3 run_experiment.py -c config/experiments/lazy_pages.yaml
 """
 
 import sys

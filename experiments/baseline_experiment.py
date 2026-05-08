@@ -6,13 +6,10 @@ This script runs a complete CRIU checkpoint/migration experiment with configurab
 workload and checkpoint strategy.
 
 Usage:
-    # Run with default configuration
+    # Run with built-in DEFAULTS (lib/config.py:DEFAULTS)
     python3 baseline_experiment.py
 
-    # Run with custom configuration file
-    python3 baseline_experiment.py --config config/experiments/lazy_pages.yaml
-
-    # Override specific settings
+    # Override individual settings via CLI
     python3 baseline_experiment.py --source-ip 10.0.1.10 --dest-ip 10.0.1.11
 
     # Use memory workload with custom settings
@@ -101,7 +98,7 @@ def parse_args():
         '--workload', '-w',
         type=str,
         default='memory',
-        choices=['memory', 'matmul', 'redis', 'ml_training', 'dataproc', 'video', 'xgboost', 'memcached', '7zip'],
+        choices=['memory', 'matmul', 'redis', 'ml_training', 'dataproc', 'xgboost', 'memcached'],
         help='Workload type to run'
     )
     parser.add_argument(
@@ -173,31 +170,11 @@ def parse_args():
     parser.add_argument('--target-throughput', type=int, default=None,
                         help='YCSB target throughput ops/s (default: 0=unlimited)')
 
-    # Video workload
-    parser.add_argument(
-        '--resolution',
-        type=str,
-        default=None,
-        help='Video resolution WxH (default: 1920x1080)'
-    )
-    parser.add_argument(
-        '--fps',
-        type=int,
-        default=None,
-        help='Frames per second (default: 30)'
-    )
     parser.add_argument(
         '--duration',
         type=int,
         default=None,
-        help='Duration in seconds for workload execution (all workloads support this)'
-    )
-    parser.add_argument(
-        '--video-mode',
-        type=str,
-        choices=['file', 'live'],
-        default=None,
-        help='Video output mode (default: live)'
+        help='Duration in seconds for workload execution (all workloads support this; 0 = infinite)'
     )
 
     # DataProc workload
@@ -631,15 +608,8 @@ def build_overrides(args) -> dict:
     if args.target_throughput is not None:
         overrides['workload.target_throughput'] = args.target_throughput
 
-    # Video workload
-    if args.resolution:
-        overrides['workload.resolution'] = args.resolution
-    if args.fps:
-        overrides['workload.fps'] = args.fps
-    if args.duration:
+    if args.duration is not None:
         overrides['workload.duration'] = args.duration
-    if args.video_mode:
-        overrides['workload.mode'] = args.video_mode
 
     # DataProc workload
     if args.num_rows:
@@ -764,15 +734,12 @@ def main():
     setup_logging(args.log_level)
     logger = logging.getLogger(__name__)
 
-    # Determine config file
-    if args.config:
-        config_file = args.config
+    # Optional yaml override; if not given, use DEFAULTS from lib/config.py
+    config_file = args.config if args.config else None
+    if config_file:
+        logger.info(f"Using configuration override: {config_file}")
     else:
-        # Use default config
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        config_file = os.path.join(base_dir, 'config', 'default.yaml')
-
-    logger.info(f"Using configuration: {config_file}")
+        logger.info("Using DEFAULTS from lib/config.py (no yaml override)")
 
     # Build overrides from command line
     overrides = build_overrides(args)

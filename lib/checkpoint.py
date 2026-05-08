@@ -272,7 +272,11 @@ class CheckpointManager:
 
         # Start strace in background to capture stdout from the beginning
         # This will run until we explicitly stop it before dump
-        # Use nohup and redirect stderr to avoid blocking the SSH session
+        # Use nohup and redirect stderr to avoid blocking the SSH session.
+        # NOTE: pre-dump strace tracks main thread only. Daemon-thread output
+        # (memcached/redis YCSB streaming thread) is missed here, but the
+        # post-restore strace uses -ff to capture all threads, which is the
+        # measurement that matters for cross-region progress analysis.
         strace_file = f"{self.working_dir}/workload_stdout_pre_dump.log.raw"
         strace_cmd = f"nohup sudo strace -p {pid} -e trace=write -e write=1,2 -s 4096 -o {strace_file} > /dev/null 2>&1 &"
         client.execute(strace_cmd)
@@ -728,7 +732,7 @@ class CheckpointManager:
 
         Args:
             host: Host where workload was restored
-            workload_type: Type of workload (redis, video, etc.)
+            workload_type: Type of workload (redis, memcached, xgboost, etc.)
             config: Workload configuration
             username: SSH username
 
@@ -781,24 +785,6 @@ class CheckpointManager:
                 'error': stderr or 'No stats response'
             }
 
-        elif workload_type == 'video':
-            # Check ffmpeg process is running
-            stdout, stderr, status = client.execute(
-                "pgrep -x ffmpeg",
-                timeout=10
-            )
-            if status == 0 and stdout.strip():
-                return {
-                    'healthy': True,
-                    'service': 'ffmpeg',
-                    'pid': stdout.strip()
-                }
-            return {
-                'healthy': False,
-                'service': 'ffmpeg',
-                'error': 'ffmpeg process not found'
-            }
-
         else:
             # Generic Python process check
             stdout, stderr, status = client.execute(
@@ -836,10 +822,6 @@ class CheckpointManager:
             pattern = 'redis-server'
         elif workload_type == 'memcached':
             pattern = 'memcached'
-        elif workload_type == 'video':
-            pattern = 'ffmpeg'
-        elif workload_type == '7zip':
-            pattern = '7z'
         else:
             pattern = f'{workload_type}_standalone.py'
 
@@ -1096,9 +1078,19 @@ class CheckpointManager:
                 if echo "$PROC_NAME" | grep -q 'python'; then
                     echo "Attaching strace for {strace_duration}s..." >> {strace_file}.info
 
-                    sudo timeout {strace_duration} strace -p $PID -e trace=write -e write=1,2 -s 4096 -o {strace_file}.raw 2>> {strace_file}.info
+                    # `-ff` follows new threads — needed for memcached/redis
+                    # daemon thread that re-emits YCSB stdout. Per-thread output
+                    # files are written as {strace_file}.raw.<TID>.
+                    sudo timeout {strace_duration} strace -p $PID -ff -e trace=write -e write=1,2 -s 4096 -o {strace_file}.raw 2>> {strace_file}.info
                     STRACE_EXIT=$?
                     echo "Strace exit code: $STRACE_EXIT" >> {strace_file}.info
+
+                    # Concatenate per-thread strace output files into a single
+                    # {strace_file}.raw so downstream parsers do not need to
+                    # know about the per-TID split.
+                    if ls {strace_file}.raw.* >/dev/null 2>&1; then
+                        cat {strace_file}.raw.* > {strace_file}.raw
+                    fi
 
                     # Parse strace output
                     if [ -f {strace_file}.raw ]; then
@@ -1198,11 +1190,9 @@ class CheckpointManager:
             'matmul': 'matmul_standalone.py',
             'redis': 'redis-server',
             'memcached': 'memcached',
-            'video': 'ffmpeg',
             'dataproc': 'dataproc_standalone.py',
             'ml_training': 'ml_training_standalone.py',
             'xgboost': 'xgboost_standalone.py',
-            '7zip': 'sevenzip_standalone.py',
         }
 
         pattern = process_patterns.get(workload_type, workload_type)

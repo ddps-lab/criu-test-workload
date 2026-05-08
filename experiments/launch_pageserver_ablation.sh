@@ -249,7 +249,6 @@ for run in \$(seq 1 ${REPEAT}); do
     sleep 2
 
     sudo -E python3 -u experiments/baseline_experiment.py \\
-        --config config/experiments/memcached_lazy_prefetch.yaml \\
         --source-ip ${SRC_PRIV} --dest-ip ${DST_PRIV} \\
         --ssh-user ubuntu --workload ${WTYPE} \\
         --lazy-mode live-migration \\

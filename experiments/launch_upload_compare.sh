@@ -67,8 +67,8 @@ ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$IP "
 scp -i $SSH_KEY -o StrictHostKeyChecking=no "${CRIU_SRC}/criu/criu" \
     ubuntu@$IP:/tmp/criu.phase6-compression >/dev/null
 for f in experiments/baseline_experiment.py lib/checkpoint.py lib/criu_utils.py \
-         lib/lazy_mode.py lib/hot_vma.py experiments/dump_all_workloads.sh \
-         config/default.yaml; do
+         lib/lazy_mode.py lib/hot_vma.py lib/config.py \
+         experiments/dump_all_workloads.sh; do
     scp -i $SSH_KEY -o StrictHostKeyChecking=no "/spot_kubernetes/criu_workload/$f" \
         ubuntu@$IP:/tmp/$(basename $f) >/dev/null
 done
@@ -118,7 +118,7 @@ sudo install -m 0644 -o ubuntu -g ubuntu /tmp/checkpoint.py         lib/checkpoi
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/criu_utils.py         lib/criu_utils.py
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/lazy_mode.py          lib/lazy_mode.py
 sudo install -m 0644 -o ubuntu -g ubuntu /tmp/hot_vma.py            lib/hot_vma.py
-sudo install -m 0644 -o ubuntu -g ubuntu /tmp/default.yaml          config/default.yaml
+sudo install -m 0644 -o ubuntu -g ubuntu /tmp/config.py             lib/config.py
 sudo install -m 0755 -o ubuntu -g ubuntu /tmp/dump_all_workloads.sh experiments/dump_all_workloads.sh
 
 run_variant() {
@@ -136,7 +136,6 @@ run_variant() {
     if [ "$mode" = "direct" ]; then
         sudo -E env AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
             python3 experiments/baseline_experiment.py \
-            --config config/experiments/memcached_lazy_prefetch.yaml \
             --source-ip 127.0.0.1 --dest-ip 127.0.0.1 \
             --workload $TYPE $EXTRA \
             --s3-direct-upload \
@@ -175,7 +174,6 @@ PYEOF
         # "local" mode: no S3 direct upload; CRIU writes to local disk, then aws s3 cp.
         sudo -E env AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
             python3 experiments/baseline_experiment.py \
-            --config config/experiments/memcached_lazy_prefetch.yaml \
             --source-ip 127.0.0.1 --dest-ip 127.0.0.1 \
             --workload $TYPE $EXTRA \
             --lazy-mode lazy-prefetch \

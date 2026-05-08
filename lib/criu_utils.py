@@ -1037,9 +1037,26 @@ class CRIUExperiment:
         if not result['success']:
             raise RuntimeError(f"Restore failed: {result.get('error')}")
 
-        # Verify restored process and capture post-restore log
+        # Signal post-restore to YCSB-style wrappers (memcached/redis) by
+        # removing checkpoint_flag on dest. Without this, those wrappers stay
+        # blocked in `while not check_restore_complete: time.sleep(1)` and
+        # never restart their YCSB run, so post-restore strace sees nothing.
+        try:
+            working_dir = self.checkpoint_config.get('dirs', {}).get('working_dir', '/tmp/criu_checkpoint')
+            client = self.checkpoint_mgr.get_ssh_client(self.dest_host, self.ssh_user)
+            client.execute(f"rm -f {working_dir}/checkpoint_flag")
+            logger.info(f"Removed {working_dir}/checkpoint_flag on dest to signal restore-complete")
+        except Exception as _e:
+            logger.warning(f"Failed to remove checkpoint_flag on dest: {_e}")
+
+        # Verify restored process and capture post-restore log.
+        # POST_RESTORE_STRACE_DURATION_SEC env var overrides the default 3 s
+        # capture window, used to record long-running workload progress
+        # during lazy-pages drain (e.g. ml-training cross-region).
+        import os as _os
+        post_restore_wait = float(_os.environ.get('POST_RESTORE_STRACE_DURATION_SEC', '3.0'))
         verify_result = self.checkpoint_mgr.verify_restored_process(
-            self.dest_host, workload_type, wait_time=3.0, username=self.ssh_user
+            self.dest_host, workload_type, wait_time=post_restore_wait, username=self.ssh_user
         )
 
         self.metrics.record_restore(

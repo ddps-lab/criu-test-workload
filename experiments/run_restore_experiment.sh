@@ -80,8 +80,7 @@ S3_COMMON="--s3-type $S3_TYPE --s3-upload-bucket $S3_BUCKET --s3-region $S3_REGI
   --s3-prefix $S3_PREFIX"
 
 # source-ip = dest-ip (restore on self, S3 provides checkpoint)
-COMMON="--config config/experiments/memcached_lazy_prefetch.yaml \
-  --source-ip 127.0.0.1 --dest-ip $DEST_IP \
+COMMON="--source-ip 127.0.0.1 --dest-ip $DEST_IP \
   --workload $WORKLOAD --duration 0 $EXTRA_ARGS"
 
 echo "=========================================="

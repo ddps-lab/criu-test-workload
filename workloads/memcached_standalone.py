@@ -188,7 +188,9 @@ memcached.hosts=localhost:{port}
 
 
 def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
-                   ycsb_threads: int, target_throughput: int) -> subprocess.Popen:
+                   ycsb_threads: int, target_throughput: int,
+                   stream_status: bool = False,
+                   status_interval: int = 5) -> subprocess.Popen:
     """Run a YCSB phase (load or run) against memcached.
 
     The /opt/ycsb/bin/ycsb script is a bash wrapper that exec()s java in
@@ -198,6 +200,10 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
     during freeze. To kill the entire YCSB tree atomically we put it in
     its own process group via setsid (preexec_fn=os.setsid) and later
     signal the whole group with os.killpg().
+
+    stream_status=True pipes YCSB stdout so the caller can spawn
+    _stream_ycsb_stdout() to re-print "X sec: Y ops/sec" lines on the
+    wrapper stdout for strace -p WRAPPER_PID -e write capture.
     """
     import os as _os
     ycsb_bin = get_ycsb_bin(ycsb_home)
@@ -205,19 +211,47 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
         ycsb_bin, phase, 'memcached', '-s',
         '-P', props_path,
         '-threads', str(ycsb_threads),
+        '-p', f'status.interval={status_interval}',
     ]
     if target_throughput > 0:
         cmd.extend(['-target', str(target_throughput)])
 
     print(f"[Memcached] YCSB {phase}: {' '.join(cmd)}")
 
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        preexec_fn=_os.setsid,
-    )
+    if stream_status:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            preexec_fn=_os.setsid,
+        )
+    else:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=_os.setsid,
+        )
     return process
+
+
+def _stream_ycsb_stdout(proc: subprocess.Popen, label: str = '[Memcached YCSB]'):
+    """Daemon thread re-prints YCSB stdout lines to wrapper stdout for strace."""
+    import threading
+    def _reader():
+        try:
+            for raw in iter(proc.stdout.readline, b''):
+                if not raw:
+                    break
+                line = raw.decode('utf-8', errors='replace').rstrip()
+                if line:
+                    print(f"{label} {line}", flush=True)
+        except Exception:
+            pass
+    t = threading.Thread(target=_reader, name=f'ycsb-stream-{proc.pid}', daemon=True)
+    t.start()
+    return t
 
 
 def kill_ycsb_proc(proc: subprocess.Popen, label: str = "YCSB"):
@@ -398,7 +432,9 @@ def run_memcached_workload(
     print(f"[Memcached] Starting YCSB run for dirty-tracker-visible warmup "
           f"(limit={warmup_seconds}s before kill in dump mode)")
     run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                              ycsb_threads, target_throughput)
+                              ycsb_threads, target_throughput,
+                              stream_status=True)
+    _stream_ycsb_stdout(run_proc)
     print(f"[Memcached] YCSB run started (pid={run_proc.pid})")
 
     warmup_start = time.time()
@@ -423,7 +459,9 @@ def run_memcached_workload(
                 time.sleep(1)
             print(f"[Memcached] Restore detected; starting fresh YCSB run")
             run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                                      ycsb_threads, target_throughput)
+                                      ycsb_threads, target_throughput,
+                                      stream_status=True)
+            _stream_ycsb_stdout(run_proc)
             print(f"[Memcached] YCSB run restarted (pid={run_proc.pid})")
             break
         time.sleep(0.5)
@@ -434,7 +472,9 @@ def run_memcached_workload(
             time.sleep(5)
             if run_proc.poll() is not None:
                 run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                                          ycsb_threads, target_throughput)
+                                          ycsb_threads, target_throughput,
+                                          stream_status=True)
+                _stream_ycsb_stdout(run_proc)
                 print(f"[Memcached] YCSB respawned (pid={run_proc.pid})")
     except KeyboardInterrupt:
         print(f"[Memcached] Interrupted")

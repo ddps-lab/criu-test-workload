@@ -153,7 +153,6 @@ aws s3 rm s3://mhsong-criu-checkpoints/${S3_PREFIX}/ --recursive --region us-wes
 
 echo "=== [\$(date +%H:%M:%S)] $NAME: dump (--wait-before-dump 120 --duration 86400) ==="
 sudo -E python3 -u experiments/baseline_experiment.py \\
-    --config config/experiments/memcached_lazy_prefetch.yaml \\
     --source-ip 127.0.0.1 --dest-ip \$DEST_PRIV \\
     --ssh-user ubuntu --workload $WORKLOAD \\
     --lazy-mode lazy-prefetch \\

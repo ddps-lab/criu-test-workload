@@ -184,7 +184,6 @@ echo "=== [\$(date +%H:%M:%S)] ${NAME}: compressed dump -> s3://mhsong-criu-chec
 aws s3 rm s3://mhsong-criu-checkpoints/${COMP_PREFIX}/ --recursive --region us-west-2 --quiet
 
 sudo -E python3 -u experiments/baseline_experiment.py \\
-    --config config/experiments/memcached_lazy_prefetch.yaml \\
     --source-ip 127.0.0.1 --dest-ip \$DEST_PRIV \\
     --ssh-user ubuntu --workload ${WORKLOAD} \\
     --lazy-mode lazy-prefetch \\

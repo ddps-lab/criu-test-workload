@@ -119,6 +119,7 @@ def run_ml_training_workload(
     working_dir: str = '.',
     dataset_size: int = None,  # Override dataset size
     keep_running: bool = True,
+    step_log_interval: int = 100,  # Print progress every N steps (0 = disable)
 ):
     """
     Main ML training workload.
@@ -232,6 +233,7 @@ def run_ml_training_workload(
         batch_count = 0
 
         model.train()
+        last_step_emit = time.time()
         for batch_idx, (data, target) in enumerate(dataloader):
             data, target = data.to(device), target.to(device)
 
@@ -245,6 +247,19 @@ def run_ml_training_workload(
             batch_count += 1
             total_batches += 1
 
+            # Per-step throughput line every step_log_interval batches.
+            # strace -e write=1,2 captures these as fine-grained progress
+            # markers (esp. when one epoch is many seconds).
+            if step_log_interval > 0 and total_batches % step_log_interval == 0:
+                now = time.time()
+                window_s = now - last_step_emit
+                rate = step_log_interval / window_s if window_s > 0 else 0
+                elapsed = now - training_start_time
+                print(f"[MLTrain] step={total_batches} epoch={epoch} batch={batch_idx + 1} loss={loss.item():.4f} "
+                      f"rate={rate:.2f}step/s elapsed={elapsed:.0f}s",
+                      flush=True)
+                last_step_emit = now
+
         epoch_duration = time.time() - epoch_start_time
         avg_loss = epoch_loss / batch_count
         loss_history.append(avg_loss)
@@ -252,7 +267,8 @@ def run_ml_training_workload(
             best_loss = avg_loss
 
         elapsed = time.time() - training_start_time
-        print(f"[MLTrain] Epoch {epoch}: loss={avg_loss:.4f}, best={best_loss:.4f}, time={epoch_duration:.2f}s, elapsed={elapsed:.0f}s")
+        print(f"[MLTrain] Epoch {epoch}: loss={avg_loss:.4f}, best={best_loss:.4f}, time={epoch_duration:.2f}s, elapsed={elapsed:.0f}s",
+              flush=True)
 
 
 def main():
@@ -307,6 +323,12 @@ def main():
         action='store_true',
         help='Stop when restore is detected (checkpoint_flag removed). Default: keep running.'
     )
+    parser.add_argument(
+        '--step-log-interval',
+        type=int,
+        default=100,
+        help='Print progress line every N batches (0 = disable). Used by strace -e write to track step-level throughput across CRIU restore.'
+    )
 
     args = parser.parse_args()
     args.keep_running = not args.stop_on_restore
@@ -320,6 +342,7 @@ def main():
         working_dir=args.working_dir,
         dataset_size=args.dataset_size,
         keep_running=args.keep_running,
+        step_log_interval=args.step_log_interval,
     )
 
 

@@ -1,24 +1,96 @@
 """
 Configuration loader for CRIU experiments.
 
-Loads YAML configuration files and supports environment variable substitution.
+Defaults are defined in DEFAULTS below. Optional --config YAML override and
+servers.yaml node-IP merge supported, but neither is required.
 """
 
+import copy
 import os
 import yaml
 from typing import Dict, Any, Optional
 from pathlib import Path
 
 
+# ---------------------------------------------------------------------------
+# DEFAULTS — replaces the old config/default.yaml + memcached_lazy_prefetch.yaml.
+# All baseline_experiment.py CLI flags override these.  The critical change vs
+# the old yaml: workload.duration defaults to 0 (infinite) so dumps re-used
+# later (e.g., cross-region or stored in S3) do not auto-exit on restore.
+# ---------------------------------------------------------------------------
+DEFAULTS: Dict[str, Any] = {
+    'experiment': {
+        'name': 'criu-experiment',
+        'workload_type': 'memory',
+        'description': 'CRIU checkpoint/restore experiment',
+        'save_metrics': True,
+        'metrics_file': 'metrics.json',
+    },
+    'nodes': {
+        'ssh_user': 'ubuntu',
+        'ssh_key': '~/.ssh/id_ed25519',
+        'source': {'ip': '${SOURCE_NODE_IP}', 'name': 'source-node'},
+        'destination': {'ip': '${DEST_NODE_IP}', 'name': 'dest-node'},
+    },
+    'checkpoint': {
+        'dirs': {'working_dir': '/tmp/criu_checkpoint'},
+        'strategy': {
+            'mode': 'full',
+            'wait_before_dump': 90,
+            'lazy_mode': 'none',
+            'page_server_port': 27,
+            'prefetch_workers': 0,
+            'predump_iterations': 8,
+            'predump_interval': 10,
+            'sync_after_predump': False,
+        },
+    },
+    'transfer': {
+        'method': 'rsync',
+        'dest_dir': '/tmp/criu_checkpoint',
+    },
+    's3': {
+        'type': 'standard',
+        'upload_bucket': '',
+        'prefix': '',
+        'region': '',
+        'download_endpoint': '',
+        'download_bucket': '',
+        'access_key': '${AWS_ACCESS_KEY_ID}',
+        'secret_key': '${AWS_SECRET_ACCESS_KEY}',
+    },
+    'workload': {
+        'working_dir': '/tmp/criu_checkpoint',
+        'readiness': {'file_path': 'checkpoint_ready', 'timeout': 300},
+        # workload.duration omitted on purpose: 0/None means "no auto-exit",
+        # which is the safe default for dumps re-used after wall-clock has
+        # advanced past the dump's start_time.
+    },
+    'paths': {
+        'scripts_dir': '/tmp/criu_checkpoint',
+        'data_dir': '/tmp/criu_data',
+        'data_setup': {'method': 'generate'},
+    },
+    'migration': {
+        'metrics': [
+            'checkpoint_time', 'transfer_time', 'restore_time',
+            'total_downtime', 'data_integrity',
+        ],
+        'success_criteria': {'process_running': True},
+    },
+}
+
+
 class ConfigLoader:
-    """Load and validate YAML configuration with environment variable support."""
+    """Load and validate configuration with environment variable support."""
 
     def __init__(self, config_file: Optional[str] = None, overrides: Optional[Dict[str, Any]] = None):
         """
         Initialize configuration loader.
 
         Args:
-            config_file: Path to YAML configuration file. If None, uses default.yaml
+            config_file: Optional YAML file to layer on top of DEFAULTS.
+                         If None, DEFAULTS is used as-is.
             overrides: Dictionary of configuration overrides
         """
         self.config_file = config_file
@@ -27,27 +99,18 @@ class ConfigLoader:
 
     def load(self) -> Dict[str, Any]:
         """
-        Load configuration from file and apply overrides.
-
-        Loads default.yaml for experiment settings, then merges servers.yaml
-        for node configuration if available.
-
-        Returns:
-            Dictionary containing complete configuration
+        Load configuration: DEFAULTS, then optional yaml file, then servers.yaml,
+        then env-var substitution, then CLI overrides.
         """
-        # Load base configuration
+        self.config = copy.deepcopy(DEFAULTS)
+
         if self.config_file:
             config_path = Path(self.config_file)
-        else:
-            # Default to config/default.yaml
-            base_dir = Path(__file__).parent.parent
-            config_path = base_dir / 'config' / 'default.yaml'
-
-        if not config_path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-        with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
+            if not config_path.exists():
+                raise FileNotFoundError(f"Configuration file not found: {config_path}")
+            with open(config_path, 'r') as f:
+                file_config = yaml.safe_load(f) or {}
+            self.config = _deep_merge(self.config, file_config)
 
         # Load servers.yaml and merge node configuration
         self._load_servers_config()
@@ -178,6 +241,17 @@ class ConfigLoader:
                 return default
 
         return current
+
+
+def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge overlay into base; overlay values win."""
+    result = copy.deepcopy(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 class ConfigValidator:

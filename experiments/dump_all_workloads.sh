@@ -146,7 +146,6 @@ dump_one() {
             AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
             AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
             python3 experiments/baseline_experiment.py \
-            --config config/experiments/memcached_lazy_prefetch.yaml \
             --source-ip 127.0.0.1 --dest-ip 127.0.0.1 \
             --workload "$TYPE" \
             $EXTRA \

@@ -227,7 +227,9 @@ redis.port={redis_port}
 
 
 def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
-                   ycsb_threads: int, target_throughput: int) -> subprocess.Popen:
+                   ycsb_threads: int, target_throughput: int,
+                   stream_status: bool = False,
+                   status_interval: int = 5) -> subprocess.Popen:
     """Run a YCSB phase (load or run).
 
     /opt/ycsb/bin/ycsb is a bash wrapper that exec()s java in the
@@ -235,6 +237,10 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
     can later kill the entire tree (bash + java + their children) with
     os.killpg(); otherwise Popen.terminate() reaches only the bash and
     leaves the java grandchild as a PPID=1 orphan that races the dump.
+
+    If stream_status=True, YCSB's stdout is piped (not DEVNULL) and the
+    caller spawns _stream_ycsb_stdout() to re-print lines on the wrapper
+    stdout — so strace -p WRAPPER_PID -e write captures throughput info.
     """
     import os as _os
     ycsb_bin = get_ycsb_bin(ycsb_home)
@@ -242,19 +248,50 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
         ycsb_bin, phase, 'redis', '-s',
         '-P', props_path,
         '-threads', str(ycsb_threads),
+        '-p', f'status.interval={status_interval}',
     ]
     if target_throughput > 0:
         cmd.extend(['-target', str(target_throughput)])
 
     print(f"[Redis] YCSB {phase}: {' '.join(cmd)}")
 
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        preexec_fn=_os.setsid,
-    )
+    if stream_status:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            preexec_fn=_os.setsid,
+        )
+    else:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=_os.setsid,
+        )
     return process
+
+
+def _stream_ycsb_stdout(proc: subprocess.Popen, label: str = '[Redis YCSB]'):
+    """Spawn a daemon thread that reads YCSB stdout line-by-line and re-prints to
+    wrapper stdout, so strace -p WRAPPER_PID -e write captures every YCSB
+    "X sec: Y ops; Z ops/sec" status line.
+    """
+    import threading
+    def _reader():
+        try:
+            for raw in iter(proc.stdout.readline, b''):
+                if not raw:
+                    break
+                line = raw.decode('utf-8', errors='replace').rstrip()
+                if line:
+                    print(f"{label} {line}", flush=True)
+        except Exception:
+            pass
+    t = threading.Thread(target=_reader, name=f'ycsb-stream-{proc.pid}', daemon=True)
+    t.start()
+    return t
 
 
 def kill_ycsb_proc(proc: subprocess.Popen, label: str = "YCSB"):
@@ -347,7 +384,9 @@ def monitor_ycsb_run(
     Returns result dict.
     """
     print(f"[Redis] Starting YCSB run phase...")
-    run_proc = run_ycsb_phase(ycsb_home, 'run', props_path, ycsb_threads, target_throughput)
+    run_proc = run_ycsb_phase(ycsb_home, 'run', props_path, ycsb_threads,
+                              target_throughput, stream_status=True)
+    _stream_ycsb_stdout(run_proc)
 
     start_time = time.time()
     last_report_time = start_time
@@ -375,13 +414,7 @@ def monitor_ycsb_run(
         # Check if YCSB run finished naturally
         if run_proc.poll() is not None and not ycsb_finished:
             ycsb_finished = True
-            if run_proc.stdout:
-                stdout_data = run_proc.stdout.read().decode('utf-8', errors='replace')
-            else:
-                stdout_data = ''
-            for line in stdout_data.split('\n'):
-                if '[OVERALL]' in line or '[READ]' in line or '[UPDATE]' in line:
-                    print(f"[Redis] YCSB: {line.strip()}")
+            # streaming thread already echoed [OVERALL]/[READ]/[UPDATE] lines.
             print(f"[Redis] YCSB run phase finished (exit={run_proc.returncode})")
             if not keep_running:
                 print(f"[Redis] YCSB done, exiting")
@@ -399,12 +432,15 @@ def monitor_ycsb_run(
             print(f"[Redis] YCSB done, restarting YCSB and keeping redis alive")
             try:
                 run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                                          ycsb_threads, target_throughput)
+                                          ycsb_threads, target_throughput,
+                                          stream_status=True)
+                _stream_ycsb_stdout(run_proc)
+                ycsb_finished = False  # let the loop track this restart
                 print(f"[Redis] YCSB restarted (pid={run_proc.pid})")
             except Exception as e:
                 print(f"[Redis] YCSB restart failed: {e}")
-            while True:
-                time.sleep(5)
+                while True:
+                    time.sleep(5)
 
         current_time = time.time()
         if current_time - last_report_time >= 5.0:
@@ -671,7 +707,9 @@ def run_redis_workload(
         print(f"[Redis] Starting YCSB run for dirty-tracker-visible warmup "
               f"(limit={warmup_seconds}s before kill in dump mode)")
         run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                                  ycsb_threads, target_throughput)
+                                  ycsb_threads, target_throughput,
+                                  stream_status=True)
+        _stream_ycsb_stdout(run_proc)
         print(f"[Redis] YCSB run started (pid={run_proc.pid})")
 
         warmup_start = time.time()
@@ -691,7 +729,9 @@ def run_redis_workload(
                     time.sleep(1)
                 print(f"[Redis] Restore detected; starting fresh YCSB run")
                 run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                                          ycsb_threads, target_throughput)
+                                          ycsb_threads, target_throughput,
+                                          stream_status=True)
+                _stream_ycsb_stdout(run_proc)
                 print(f"[Redis] YCSB run restarted (pid={run_proc.pid})")
                 break
             time.sleep(0.5)
@@ -702,7 +742,9 @@ def run_redis_workload(
                 time.sleep(5)
                 if run_proc.poll() is not None:
                     run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
-                                              ycsb_threads, target_throughput)
+                                              ycsb_threads, target_throughput,
+                                              stream_status=True)
+                    _stream_ycsb_stdout(run_proc)
                     print(f"[Redis] YCSB respawned (pid={run_proc.pid})")
         except KeyboardInterrupt:
             print(f"[Redis] Interrupted")
@@ -897,7 +939,8 @@ def main():
         '--duration',
         type=int,
         default=0,
-        help='Duration in seconds for continuous operations (0 = populate only)'
+        help='Duration in seconds. YCSB mode: 0=unlimited (operationcount=2.1B). '
+             'Built-in mode: 0=populate-only, >0=continuous ops for N seconds.'
     )
     parser.add_argument(
         '--working_dir',

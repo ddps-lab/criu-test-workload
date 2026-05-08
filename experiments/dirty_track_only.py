@@ -49,11 +49,9 @@ STANDALONE_SCRIPTS = {
     'matmul': 'workloads/matmul_standalone.py',
     'redis': 'workloads/redis_standalone.py',
     'ml_training': 'workloads/ml_training_standalone.py',
-    'video': 'workloads/video_standalone.py',
     'dataproc': 'workloads/dataproc_standalone.py',
     'xgboost': 'workloads/xgboost_standalone.py',
     'memcached': 'workloads/memcached_standalone.py',
-    '7zip': 'workloads/sevenzip_standalone.py',
     'memwrite': 'workloads/memwrite_standalone.py',
 }
 
@@ -123,14 +121,6 @@ def build_workload_cmd(args, working_dir: str) -> list:
         if args.dataset_size:
             cmd.extend(['--dataset-size', str(args.dataset_size)])
 
-    elif args.workload == 'video':
-        if args.resolution:
-            cmd.extend(['--resolution', args.resolution])
-        if args.fps:
-            cmd.extend(['--fps', str(args.fps)])
-        if args.video_mode:
-            cmd.extend(["--mode", args.video_mode])
-
     elif args.workload == 'dataproc':
         if args.num_rows:
             cmd.extend(['--num-rows', str(args.num_rows)])
@@ -182,15 +172,6 @@ def build_workload_cmd(args, working_dir: str) -> list:
     elif args.workload == "memwrite":
         if hasattr(args, "buffer_mb") and args.buffer_mb:
             cmd.extend(["--buffer-mb", str(args.buffer_mb)])
-    elif args.workload == '7zip':
-        if args.compression_level:
-            cmd.extend(['--compression-level', str(args.compression_level)])
-        if args.sevenzip_threads:
-            cmd.extend(['--threads', str(args.sevenzip_threads)])
-        if args.input_size_mb:
-            cmd.extend(['--input-size-mb', str(args.input_size_mb)])
-        if args.seed:
-            cmd.extend(['--seed', str(args.seed)])
 
     return cmd
 
@@ -354,15 +335,6 @@ def parse_args():
     wl_group.add_argument('--dataset-size', type=int, default=None,
                           help='Dataset size (ml_training workload)')
 
-    # Video
-    wl_group.add_argument('--resolution', type=str, default=None,
-                          help='Video resolution WxH (video workload)')
-    wl_group.add_argument('--fps', type=int, default=None,
-                          help='Frames per second (video workload)')
-    wl_group.add_argument("--video-mode", type=str, default=None,
-                          choices=["file", "live"],
-                          help="Video mode: file or live (video workload)")
-
     # DataProc
     wl_group.add_argument('--num-rows', type=int, default=None,
                           help='Number of rows (dataproc workload)')
@@ -401,21 +373,13 @@ def parse_args():
     wl_group.add_argument('--xgb-num-threads', type=int, default=None,
                           help='Number of threads (xgboost workload)')
     wl_group.add_argument('--seed', type=int, default=None,
-                          help='Random seed (xgboost/7zip workload)')
+                          help='Random seed (xgboost workload)')
 
     # Memcached
     wl_group.add_argument('--memcached-port', type=int, default=None,
                           help='Memcached port (memcached workload)')
     wl_group.add_argument('--memcached-memory', type=int, default=None,
                           help='Memcached memory in MB (memcached workload)')
-
-    # 7zip
-    wl_group.add_argument('--compression-level', type=int, default=None,
-                          help='Compression level 1-9 (7zip workload)')
-    wl_group.add_argument('--sevenzip-threads', type=int, default=None,
-                          help='Compression threads (7zip workload)')
-    wl_group.add_argument('--input-size-mb', type=int, default=None,
-                          help='Input file size in MB (7zip workload)')
 
     # Logging
     parser.add_argument('--log-level', type=str, default='INFO',
