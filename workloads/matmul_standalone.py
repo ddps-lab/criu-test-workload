@@ -53,6 +53,7 @@ def run_matmul_workload(
     duration: int = 0,  # 0 = infinite (use iterations limit)
     working_dir: str = '.',
     keep_running: bool = True,
+    chunk_log_rows: int = 1000,  # rows per chunk; 0 disables chunking
 ):
     """
     Power Iteration eigenvalue solver workload.
@@ -147,7 +148,28 @@ def run_matmul_workload(
         iter_start = time.time()
 
         # Power iteration step: v_{k+1} = A*v_k / ||A*v_k||
-        Av = np.dot(A, v)
+        # We chunk the dot product so cross-region restore can emit
+        # finer-grained progress lines via strace -ff (each iteration on
+        # a 25000-row matrix touches ~5 GB of memory; under lazy-pages
+        # cross-region S3 the first iteration alone can take many minutes
+        # while every page faults in, producing zero stdout otherwise).
+        if chunk_log_rows > 0 and chunk_log_rows < matrix_size:
+            Av = np.empty(matrix_size, dtype=A.dtype)
+            chunk_t0 = time.time()
+            for r0 in range(0, matrix_size, chunk_log_rows):
+                r1 = min(r0 + chunk_log_rows, matrix_size)
+                Av[r0:r1] = np.dot(A[r0:r1], v)
+                # Emit a chunk-progress line every chunk so post-restore
+                # strace observes the workload making per-row progress
+                # even before the full iteration completes.
+                now = time.time()
+                total_elapsed = now - start_time
+                print(f"[MatMul] iter={iteration} chunk={r1}/{matrix_size} "
+                      f"chunk_dt={(now - chunk_t0):.2f}s elapsed={total_elapsed:.0f}s",
+                      flush=True)
+                chunk_t0 = now
+        else:
+            Av = np.dot(A, v)
         eigenvalue = np.dot(v, Av)
         v_new = Av / np.linalg.norm(Av)
 
@@ -163,7 +185,8 @@ def run_matmul_workload(
         if iteration % 100 == 0 or iteration <= 5:
             total_elapsed = time.time() - start_time
             print(f"[MatMul] Iteration {iteration}: eigenvalue={eigenvalue:.8f}, "
-                  f"delta={delta:.2e}, time={iter_elapsed:.3f}s, elapsed={total_elapsed:.0f}s")
+                  f"delta={delta:.2e}, time={iter_elapsed:.3f}s, elapsed={total_elapsed:.0f}s",
+                  flush=True)
 
         if interval > iter_elapsed:
             time.sleep(interval - iter_elapsed)
@@ -208,6 +231,13 @@ def main():
         action='store_true',
         help='Stop when restore is detected (checkpoint_flag removed). Default: keep running.'
     )
+    parser.add_argument(
+        '--chunk-log-rows',
+        type=int,
+        default=1000,
+        help='Print one [MatMul] iter chunk= line every N rows of the '
+             'iteration matrix-vector product. 0 disables chunking.'
+    )
 
     args = parser.parse_args()
     args.keep_running = not args.stop_on_restore
@@ -219,6 +249,7 @@ def main():
         duration=args.duration,
         working_dir=args.working_dir,
         keep_running=args.keep_running,
+        chunk_log_rows=args.chunk_log_rows,
     )
 
 

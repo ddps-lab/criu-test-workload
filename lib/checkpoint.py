@@ -1196,11 +1196,41 @@ class CheckpointManager:
         }
 
         pattern = process_patterns.get(workload_type, workload_type)
-        ps_cmd = f"pgrep -f '{pattern}'"
-        stdout, stderr, status = client.execute(ps_cmd)
+        # For cross-region restore, the bash wrapper is visible in /proc
+        # almost immediately, but the python3 child can take up to several
+        # minutes to appear because it pages-faults its interpreter +
+        # standard-library through 130 ms RTT S3 GETs. A naive single
+        # `pgrep -f` check right after restore therefore reports the
+        # process as not running. Retry up to 5 minutes.
+        is_python_workload = pattern.endswith('_standalone.py')
+        retry_seconds = 300 if is_python_workload else 30
+        deadline = time.time() + retry_seconds
+        pids = []
+        while time.time() < deadline:
+            ps_cmd = f"pgrep -f '{pattern}'"
+            stdout, stderr, status = client.execute(ps_cmd)
+            cands = stdout.strip().split('\n') if status == 0 and stdout.strip() else []
+            if is_python_workload:
+                # Filter to python3 — skip the bash wrapper which pgrep -f
+                # also matches because the standalone path is in argv.
+                accepted = []
+                for cand in cands:
+                    if not cand:
+                        continue
+                    comm_out, _, comm_status = client.execute(f"cat /proc/{cand}/comm 2>/dev/null")
+                    comm = comm_out.strip()
+                    if comm.startswith('python'):
+                        accepted.append(cand)
+                if accepted:
+                    pids = accepted
+                    break
+            else:
+                if cands:
+                    pids = cands
+                    break
+            time.sleep(2)
 
-        is_running = status == 0 and stdout.strip()
-        pids = stdout.strip().split('\n') if is_running else []
+        is_running = bool(pids)
 
         # Capture post-restore workload status (includes strace capture)
         # Use wait_time as strace duration (default 6s to catch 5s interval outputs)

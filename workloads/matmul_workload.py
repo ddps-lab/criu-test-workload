@@ -146,6 +146,7 @@ class MatMulWorkload(BaseWorkload):
         self.iterations = config.get('iterations', 0)
         self.interval = config.get('interval', 0.1)
         self.duration = config.get('duration', 0)
+        self.chunk_log_rows = config.get('chunk_log_rows', 1000)
 
     def get_standalone_script_name(self) -> str:
         return 'matmul_standalone.py'
@@ -157,6 +158,7 @@ class MatMulWorkload(BaseWorkload):
         cmd += f" --iterations {self.iterations}"
         cmd += f" --interval {self.interval}"
         cmd += f" --duration {self.duration}"
+        cmd += f" --chunk-log-rows {self.chunk_log_rows}"
         cmd += f" --working_dir {self.working_dir}"
         return cmd
 
