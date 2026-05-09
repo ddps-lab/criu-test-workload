@@ -211,8 +211,14 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
         ycsb_bin, phase, 'memcached', '-s',
         '-P', props_path,
         '-threads', str(ycsb_threads),
-        '-p', f'status.interval={status_interval}',
     ]
+    # status.interval only meaningful for run phase status streaming.
+    # On load, adding it caused YCSB load to exit prematurely with
+    # returncode 0 for large record_count (>=6.2M), producing dumps
+    # missing the memcached child's pages. Keep load command identical
+    # to the pre-redo version.
+    if phase == 'run':
+        cmd.extend(['-p', f'status.interval={status_interval}'])
     if target_throughput > 0:
         cmd.extend(['-target', str(target_throughput)])
 
@@ -431,10 +437,17 @@ def run_memcached_workload(
 
     print(f"[Memcached] Starting YCSB run for dirty-tracker-visible warmup "
           f"(limit={warmup_seconds}s before kill in dump mode)")
+    # NOTE: warmup YCSB uses stdout=DEVNULL (stream_status=False).
+    # Streaming via PIPE caused CRIU dump to fail for large workloads
+    # (memcached-8gb/16gb, redis 5M): the wrapper Python process held a
+    # PIPE fd to YCSB (outside the --tree), and CRIU's freeze racing the
+    # PIPE state at dump time produced empty page images for the server
+    # child. Post-restore YCSB (below) keeps stream_status=True so
+    # strace -p WRAPPER_PID -ff can capture cross-region progress lines
+    # — by then there is no in-flight CRIU dump.
     run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
                               ycsb_threads, target_throughput,
-                              stream_status=True)
-    _stream_ycsb_stdout(run_proc)
+                              stream_status=False)
     print(f"[Memcached] YCSB run started (pid={run_proc.pid})")
 
     warmup_start = time.time()

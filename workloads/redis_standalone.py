@@ -248,8 +248,12 @@ def run_ycsb_phase(ycsb_home: str, phase: str, props_path: str,
         ycsb_bin, phase, 'redis', '-s',
         '-P', props_path,
         '-threads', str(ycsb_threads),
-        '-p', f'status.interval={status_interval}',
     ]
+    # See memcached_standalone.py for why status.interval is run-only:
+    # on large loads (5M+ records) `-p status.interval=5` made YCSB load
+    # return 0 prematurely and the dump captured an empty redis child.
+    if phase == 'run':
+        cmd.extend(['-p', f'status.interval={status_interval}'])
     if target_throughput > 0:
         cmd.extend(['-target', str(target_throughput)])
 
@@ -706,10 +710,12 @@ def run_redis_workload(
 
         print(f"[Redis] Starting YCSB run for dirty-tracker-visible warmup "
               f"(limit={warmup_seconds}s before kill in dump mode)")
+        # See memcached_standalone.py for why warmup YCSB uses
+        # stream_status=False: PIPE-to-YCSB held by the wrapper races CRIU
+        # dump for large workloads, producing empty page images.
         run_proc = run_ycsb_phase(ycsb_home, 'run', props_path,
                                   ycsb_threads, target_throughput,
-                                  stream_status=True)
-        _stream_ycsb_stdout(run_proc)
+                                  stream_status=False)
         print(f"[Redis] YCSB run started (pid={run_proc.pid})")
 
         warmup_start = time.time()
