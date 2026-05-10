@@ -23,7 +23,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WARMER_DIR="$(cd "$HERE/.." && pwd)"
 : "${REGION:=eu-west-3}"
-: "${AMI_ID:=ami-035969277600ff57a}"
+: "${AMI_ID:=ami-0d541ecefee1df0ea}"
 : "${INSTANCE_TYPE:=m5.8xlarge}"
 : "${KEY_NAME:=mhsong-paris}"
 : "${SG_ID:=sg-0e15048137db7780d}"

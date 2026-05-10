@@ -36,17 +36,23 @@ COMPRESS=0
 REPEAT=1
 PREFIX_BASE=""   # e.g. "instance-scaling/m5.xlarge/" — prepended to per-workload
                  # PREFIX so existing dumps at s3://$BUCKET/<wl>/ stay untouched.
+BASELINE_CLI=0   # --baseline-cli: after all reps, measure aws-cli upload (default + crt) on raw image
+BASELINE_CLI_REPS=5
+SELF_TERMINATE=0 # --self-terminate: aws ec2 terminate-instances on completion (auto-detects own instance id)
 : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID env var required}"
 : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY env var required}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --bucket)      BUCKET="$2"; shift 2 ;;
-        --region)      REGION="$2"; shift 2 ;;
-        --workload)    SEL="$2"; shift 2 ;;
-        --compress)    COMPRESS=1; shift ;;
-        --repeat)      REPEAT="$2"; shift 2 ;;
-        --prefix-base) PREFIX_BASE="$2"; shift 2 ;;
+        --bucket)             BUCKET="$2"; shift 2 ;;
+        --region)             REGION="$2"; shift 2 ;;
+        --workload)           SEL="$2"; shift 2 ;;
+        --compress)           COMPRESS=1; shift ;;
+        --repeat)             REPEAT="$2"; shift 2 ;;
+        --prefix-base)        PREFIX_BASE="$2"; shift 2 ;;
+        --baseline-cli)       BASELINE_CLI=1; shift ;;
+        --baseline-cli-reps)  BASELINE_CLI_REPS="$2"; shift 2 ;;
+        --self-terminate)     SELF_TERMINATE=1; shift ;;
         *) echo "unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -131,11 +137,13 @@ dump_one() {
             sudo find /tmp/criu_checkpoint -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} \; 2>/dev/null || true
         fi
 
-        # 1. Purge stale S3 state — but preserve prior repeats' dump-metrics/
-        # so all N repeats' logs accumulate under the same prefix.
-        echo "[purge] s3://$BUCKET/$PREFIX/ (excluding dump-metrics/*)"
-        aws s3 rm "s3://$BUCKET/$PREFIX/" --region "$REGION" --recursive --quiet \
-            --exclude "dump-metrics/*" \
+        # 1. Purge stale checkpoint files. The checkpoint/ subfolder is
+        # purged wholesale — pages-*.img / pagemap-*.img filenames depend
+        # on PID, which changes between reps, so leftover files from a
+        # prior rep would mix with the current one. dump-metrics/ sits
+        # outside checkpoint/ and is never touched here.
+        echo "[purge] s3://$BUCKET/$PREFIX/checkpoint/"
+        aws s3 rm "s3://$BUCKET/$PREFIX/checkpoint/" --region "$REGION" --recursive --quiet \
             > /dev/null 2>&1 || true
 
         # 2. Drive baseline_experiment.py through the canonical dump path.
@@ -152,7 +160,7 @@ dump_one() {
             --s3-direct-upload \
             --s3-type standard \
             --s3-upload-bucket "$BUCKET" \
-            --s3-prefix "$PREFIX" \
+            --s3-prefix "$PREFIX/checkpoint" \
             --s3-region "$REGION" \
             --s3-access-key "$AWS_ACCESS_KEY_ID" \
             --s3-secret-key "$AWS_SECRET_ACCESS_KEY" \
@@ -166,14 +174,14 @@ dump_one() {
             | grep -E 'Uploaded|Final dump|Extracted|hot-vmas|ERROR|WARNING' || true
 
         # 3. Verify the resulting prefix.
-        echo "[verify] s3://$BUCKET/$PREFIX/"
+        echo "[verify] s3://$BUCKET/$PREFIX/checkpoint/"
         local has_pages has_hot
-        has_pages=$(aws s3 ls "s3://$BUCKET/$PREFIX/" --region "$REGION" | grep -c 'pages-.*\.img' || true)
-        has_hot=$(aws s3 ls "s3://$BUCKET/$PREFIX/hot-iovs.json" --region "$REGION" 2>/dev/null | wc -l)
+        has_pages=$(aws s3 ls "s3://$BUCKET/$PREFIX/checkpoint/" --region "$REGION" | grep -c 'pages-.*\.img' || true)
+        has_hot=$(aws s3 ls "s3://$BUCKET/$PREFIX/checkpoint/hot-iovs.json" --region "$REGION" 2>/dev/null | wc -l)
         if [ "$has_pages" -gt 0 ] && [ "$has_hot" -gt 0 ]; then
             echo "      OK ($has_pages pages images, hot-iovs.json present)"
         else
-            echo "      WARN: incomplete (pages=$has_pages hot_vmas=$has_hot)"
+            echo "      WARN: incomplete (pages=$has_pages hot_iovs=$has_hot)"
         fi
 
         # 4. Persist per-repeat dump metrics under dump-metrics/repeat-$r/.
@@ -208,6 +216,91 @@ dump_one() {
     done
 }
 
+baseline_cli_one() {
+    # Measure aws-cli upload throughput on the last rep's checkpoint files,
+    # comparing default transfer client vs CRT-enabled client. Only meaningful
+    # for raw mode (compressed checkpoints already include their own pipeline
+    # behaviour and aren't the baseline target).
+    local entry="$1"
+    local NAME TYPE PREFIX EXTRA
+    IFS='|' read -r NAME TYPE PREFIX EXTRA <<< "$entry"
+    PREFIX="${PREFIX_BASE}${PREFIX}${PREFIX_SUFFIX}"
+
+    if [ "$COMPRESS" = "1" ]; then
+        echo "[baseline-cli] skipping (compressed dump)"; return 0
+    fi
+
+    echo "=========================================="
+    echo " baseline-cli for $NAME (raw)"
+    echo " src: s3://$BUCKET/$PREFIX/checkpoint/"
+    echo "=========================================="
+
+    local local_in=/tmp/baseline_input
+    sudo rm -rf "$local_in"; mkdir -p "$local_in"
+    aws s3 sync "s3://$BUCKET/$PREFIX/checkpoint/" "$local_in/" --region "$REGION" --only-show-errors
+
+    local local_bytes
+    local_bytes=$(du -sb "$local_in" | awk '{print $1}')
+    echo "[baseline-cli] downloaded $((local_bytes / 1024 / 1024)) MB to $local_in"
+
+    local metrics_file=/tmp/baseline-cli-metrics.json
+    echo "{\"workload\": \"$NAME\", \"local_bytes\": $local_bytes, \"reps\": [" > "$metrics_file"
+
+    local mode rep tmp_prefix t_start t_end wall_ms
+    local first=1
+    for mode in default crt; do
+        # configure aws-cli transfer client
+        if [ "$mode" = "crt" ]; then
+            aws configure set s3.preferred_transfer_client crt
+        else
+            aws configure set s3.preferred_transfer_client classic
+        fi
+        for rep in $(seq 1 "$BASELINE_CLI_REPS"); do
+            tmp_prefix="$PREFIX/baseline-cli-tmp/${mode}-rep${rep}"
+            echo "[baseline-cli] $mode rep $rep -> s3://$BUCKET/$tmp_prefix/"
+            t_start=$(date +%s%3N)
+            aws s3 sync "$local_in/" "s3://$BUCKET/$tmp_prefix/" --region "$REGION" --only-show-errors
+            t_end=$(date +%s%3N)
+            wall_ms=$((t_end - t_start))
+            local throughput_mbps=$(( local_bytes * 8 / 1000 / wall_ms ))
+            [ "$first" = "0" ] && echo "," >> "$metrics_file"
+            cat <<EOF >> "$metrics_file"
+  {"mode": "$mode", "rep": $rep, "wall_ms": $wall_ms, "throughput_mbps": $throughput_mbps}
+EOF
+            first=0
+            # delete the just-uploaded objects to keep storage cost minimal
+            aws s3 rm "s3://$BUCKET/$tmp_prefix/" --region "$REGION" --recursive --quiet > /dev/null 2>&1 || true
+        done
+    done
+
+    aws configure set s3.preferred_transfer_client classic  # restore default
+
+    echo "]}" >> "$metrics_file"
+
+    aws s3 cp "$metrics_file" \
+        "s3://$BUCKET/$PREFIX/dump-metrics/baseline-cli/metrics.json" \
+        --region "$REGION" --only-show-errors
+
+    sudo rm -rf "$local_in"
+    echo "[baseline-cli] done. Metrics at s3://$BUCKET/$PREFIX/dump-metrics/baseline-cli/metrics.json"
+}
+
+self_terminate() {
+    # IMDSv2 — get token then instance ID, then aws ec2 terminate-instances.
+    local TOKEN ID
+    TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 60") || true
+    ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+        http://169.254.169.254/latest/meta-data/instance-id) || true
+    if [ -z "$ID" ]; then
+        echo "[self-terminate] FAILED to get instance-id from IMDSv2"
+        return 1
+    fi
+    echo "[self-terminate] terminating instance $ID in region $REGION"
+    aws ec2 terminate-instances --region "$REGION" --instance-ids "$ID" \
+        --query 'TerminatingInstances[0].CurrentState.Name' --output text
+}
+
 FAIL=0
 for entry in "${SELECTED[@]}"; do
     if ! dump_one "$entry"; then
@@ -215,11 +308,16 @@ for entry in "${SELECTED[@]}"; do
         echo "FAILED: $entry"
     fi
     sleep 5
+    if [ "$BASELINE_CLI" = "1" ]; then
+        baseline_cli_one "$entry" || echo "WARN: baseline-cli failed for $entry"
+    fi
 done
 
 if [ "$FAIL" -eq 0 ]; then
     echo "ALL OK (${#SELECTED[@]} workloads dumped)"
+    [ "$SELF_TERMINATE" = "1" ] && self_terminate
 else
     echo "FAILURES: $FAIL / ${#SELECTED[@]}"
+    [ "$SELF_TERMINATE" = "1" ] && self_terminate
     exit 1
 fi
