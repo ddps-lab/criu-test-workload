@@ -19,8 +19,8 @@ S3_PREFIX=""
 REPEAT=5
 MODE=""           # empty = all 4 modes
 EXTRA_ARGS=""
-S3_BUCKET="mhsong-criu-checkpoints"
-S3_RESULTS_BUCKET="mhsong-criu-results"
+S3_BUCKET="mhsong-criu-data-artifact"
+S3_RESULTS_BUCKET="mhsong-criu-data-artifact"
 S3_REGION="us-west-2"
 S3_ENDPOINT="https://s3.us-west-2.amazonaws.com"
 S3_TYPE="standard"           # standard | express-one-zone | cloudfront
@@ -97,8 +97,10 @@ echo "=========================================="
 # Mode definitions
 # ============================================================
 declare -A MODE_ARGS
-# Baseline: handled separately (S3 download + non-lazy restore)
-MODE_ARGS[1_baseline]="BASELINE_SPECIAL"
+# Baseline: handled separately (S3 download + non-lazy restore).
+# Two variants: default aws-cli vs CRT transfer client — selected by name.
+MODE_ARGS[1_baseline_default]="BASELINE_SPECIAL"
+MODE_ARGS[1_baseline_crt]="BASELINE_SPECIAL"
 MODE_ARGS[2_s3_lazy_only]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-semi-sync-iov --no-async-prefetch --no-hot-vma-seed"
 MODE_ARGS[3_semi_sync]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-async-prefetch --no-hot-vma-seed"
 # PREFETCH_WORKERS env var overrides. Default = 16 — empirically optimal on
@@ -111,12 +113,10 @@ PREFETCH_WORKERS="${PREFETCH_WORKERS:-16}"
 MODE_ARGS[4_async]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --no-hot-vma-seed --prefetch-workers ${PREFETCH_WORKERS}"
 MODE_ARGS[5_full]="--lazy-mode lazy-prefetch --s3-direct-upload $S3_COMMON --prefetch-workers ${PREFETCH_WORKERS}"
 
-# Default: skip 2_s3_lazy_only (much slower than baseline on real S3, run separately if needed)
-# Default: 1_baseline + 3_semi_sync + 4_async + 5_full. Override with env
-# MODES="4_async 5_full" when you only want the async-path subset (for
-# faster iteration on compress-stack tuning where baseline/semi-sync are
-# uninformative).
-MODE_ORDER=(${MODES:-1_baseline 3_semi_sync 4_async 5_full})
+# Default: skip 2_s3_lazy_only (much slower than baseline on real S3, run separately if needed).
+# 1_baseline_default + 1_baseline_crt + 3_semi_sync + 4_async + 5_full.
+# Override with env MODES="4_async 5_full" for async-path subset.
+MODE_ORDER=(${MODES:-1_baseline_default 1_baseline_crt 3_semi_sync 4_async 5_full})
 
 # ============================================================
 # Cleanup function
@@ -160,12 +160,20 @@ cleanup() {
 # Run restore
 # ============================================================
 run_baseline() {
-    local run_num=$1
-    local outfile="$OUTDIR/1_baseline_run${run_num}.json"
-    local logfile="$OUTDIR/1_baseline_run${run_num}.log"
+    # Args: <mode_name> <run_num>
+    # mode_name selects aws-cli transfer client: 1_baseline_default | 1_baseline_crt
+    local mode_name=$1
+    local run_num=$2
+    local outfile="$OUTDIR/${mode_name}_run${run_num}.json"
+
+    case "$mode_name" in
+        1_baseline_crt)     aws configure set s3.preferred_transfer_client crt    ;;
+        1_baseline_default) aws configure set s3.preferred_transfer_client classic ;;
+    esac
+    local cli_mode=$(aws configure get s3.preferred_transfer_client 2>/dev/null || echo "?")
 
     echo ""
-    echo "--- 1_baseline run $run_num/$REPEAT ($(date +%H:%M:%S)) ---"
+    echo "--- $mode_name run $run_num/$REPEAT ($(date +%H:%M:%S), aws-cli=$cli_mode) ---"
 
     cleanup
     mkdir -p /tmp/criu_checkpoint/1
@@ -214,15 +222,15 @@ run_baseline() {
     python3 -c "
 import json
 json.dump({
-    'transfer': {'duration': $dl_ms/1000, 'method': 's3_download'},
+    'transfer': {'duration': $dl_ms/1000, 'method': 's3_download', 'cli_mode': '$cli_mode'},
     'restore': {'duration': $r_ms/1000},
-    'mode': '1_baseline',
+    'mode': '$mode_name',
     'run': $run_num
 }, open('$outfile', 'w'), indent=2)
 " 2>/dev/null
 
     # Save logs
-    cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/1_baseline_run${run_num}_restore.log" 2>/dev/null || true
+    cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/${mode_name}_run${run_num}_restore.log" 2>/dev/null || true
     echo "  Total: $((dl_ms + r_ms))ms"
 }
 
@@ -235,7 +243,7 @@ run_restore() {
 
     # Baseline is handled separately
     if [ "$args" = "BASELINE_SPECIAL" ]; then
-        run_baseline "$run_num"
+        run_baseline "$mode" "$run_num"
         return
     fi
 
@@ -350,12 +358,18 @@ echo "=========================================="
 #      doubled "compressed" when both halves encoded the variant
 #      (`<wl>-compressed_compressed/`); kept here only for backwards
 #      compatibility with older launchers.
+RESULTS_BASE="${RESULTS_BASE:-restore-perf}"
+# WL_KEY: strip dump-perf prefix + /checkpoint suffix + -compressed suffix.
+# Example: dump-perf/memcached-1gb/checkpoint -> memcached-1gb
+WL_KEY="${WL_KEY:-$(echo "$S3_PREFIX" | sed 's|/checkpoint$||;s|^dump-perf/||;s|-compressed$||')}"
+
 if [ -n "$RESULTS_PREFIX_OVERRIDE" ]; then
     RESULTS_PREFIX="${RESULTS_PREFIX_OVERRIDE}/$(date +%Y%m%d_%H%M%S)"
 elif [ -n "$RESULTS_SUFFIX" ]; then
-    RESULTS_PREFIX="${S3_PREFIX}_${RESULTS_SUFFIX}/$(date +%Y%m%d_%H%M%S)"
+    # New layout: <base>/<workload>/<suffix>/<ts>
+    RESULTS_PREFIX="${RESULTS_BASE}/${WL_KEY}/${RESULTS_SUFFIX}/$(date +%Y%m%d_%H%M%S)"
 else
-    RESULTS_PREFIX="${S3_PREFIX}/$(date +%Y%m%d_%H%M%S)"
+    RESULTS_PREFIX="${RESULTS_BASE}/${WL_KEY}/$(date +%Y%m%d_%H%M%S)"
 fi
 aws s3 sync "$OUTDIR" "s3://$S3_RESULTS_BUCKET/$RESULTS_PREFIX/" \
     --region $S3_REGION --quiet
