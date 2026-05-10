@@ -136,10 +136,10 @@ def extract_lazy_log(path):
     if total:
         out['pages_transferred'] = total
 
-    # hot-vmas.json load status (RAW/COMP parity check)
-    if _grep_count(path, 'No hot-vmas.json found') > 0:
+    # hot-iovs.json load status (RAW/COMP parity check)
+    if _grep_count(path, 'No hot-iovs.json found') > 0:
         out['hot_vmas'] = 'missing'
-    elif _grep_count(path, 'hot-vmas.json:.*HTTP 200') > 0:
+    elif _grep_count(path, 'hot-iovs.json:.*HTTP 200') > 0:
         out['hot_vmas'] = 'loaded'
 
     # Stall (per-fault wait) summary — printed by restore wrapper near daemon end

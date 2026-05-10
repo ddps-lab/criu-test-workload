@@ -17,11 +17,11 @@
 #   1. Purges s3://$BUCKET/$PREFIX/ so no stale files layer with the new dump.
 #   2. Runs baseline_experiment.py with --s3-direct-upload (images go straight
 #      to S3 via criu-s3's multipart upload path) and --track-dirty-pages so
-#      the pipeline extracts and uploads hot-vmas.json alongside the dump.
+#      the pipeline extracts and uploads hot-iovs.json alongside the dump.
 #   3. Ignores the restore-phase failure that baseline_experiment.py triggers
 #      at the end when run same-source-same-dest on a single instance — we
 #      only care that the dump + upload steps succeeded.
-#   4. Verifies hot-vmas.json and the pages-*.img / metadata set landed in S3.
+#   4. Verifies hot-iovs.json and the pages-*.img / metadata set landed in S3.
 #
 # This script deliberately does NOT replicate anything already in
 # lib/checkpoint.py or lib/criu_utils.py — it is just the driver that
@@ -169,9 +169,9 @@ dump_one() {
         echo "[verify] s3://$BUCKET/$PREFIX/"
         local has_pages has_hot
         has_pages=$(aws s3 ls "s3://$BUCKET/$PREFIX/" --region "$REGION" | grep -c 'pages-.*\.img' || true)
-        has_hot=$(aws s3 ls "s3://$BUCKET/$PREFIX/hot-vmas.json" --region "$REGION" 2>/dev/null | wc -l)
+        has_hot=$(aws s3 ls "s3://$BUCKET/$PREFIX/hot-iovs.json" --region "$REGION" 2>/dev/null | wc -l)
         if [ "$has_pages" -gt 0 ] && [ "$has_hot" -gt 0 ]; then
-            echo "      OK ($has_pages pages images, hot-vmas.json present)"
+            echo "      OK ($has_pages pages images, hot-iovs.json present)"
         else
             echo "      WARN: incomplete (pages=$has_pages hot_vmas=$has_hot)"
         fi

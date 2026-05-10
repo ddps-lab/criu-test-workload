@@ -500,7 +500,7 @@ class CRIUExperiment:
         # sudo -E python3) drops to the ubuntu user and uses ubuntu's SSH
         # key + known_hosts. Without this, scp runs as root which has a
         # stale /root/.ssh/known_hosts and no private key for
-        # ubuntu@127.0.0.1, silently fails, and we lose hot-vmas.json.
+        # ubuntu@127.0.0.1, silently fails, and we lose hot-iovs.json.
         local_dirty = '/tmp/_dirty_pattern_tmp.json'
         cmd = (f"sudo -u {self.ssh_user} -H scp -o StrictHostKeyChecking=no "
                f"-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "
@@ -513,11 +513,11 @@ class CRIUExperiment:
             return
 
         # 2. Extract hot VMAs locally
-        local_hot_vmas = '/tmp/_hot_vmas_tmp.json'
+        local_hot_iovs = '/tmp/_hot_iovs_tmp.json'
         try:
             hot_path = extract_and_save(local_dirty, '/tmp')
             import shutil
-            shutil.move(hot_path, local_hot_vmas)
+            shutil.move(hot_path, local_hot_iovs)
         except Exception as e:
             logger.warning(f"Hot VMA extraction failed: {e}")
             return
@@ -532,7 +532,7 @@ class CRIUExperiment:
             secret_key = s3_dict.get('secret_key', '')
             path_style = s3_dict.get('path_style', False)
 
-            s3_key = f"{prefix}/hot-vmas.json" if prefix else "hot-vmas.json"
+            s3_key = f"{prefix}/hot-iovs.json" if prefix else "hot-iovs.json"
 
             # Use aws CLI or curl to upload
             env = {
@@ -540,7 +540,7 @@ class CRIUExperiment:
                 'AWS_SECRET_ACCESS_KEY': secret_key,
             }
             s3_uri = f"s3://{bucket}/{s3_key}"
-            aws_cmd = f"aws s3 cp {local_hot_vmas} {s3_uri}"
+            aws_cmd = f"aws s3 cp {local_hot_iovs} {s3_uri}"
             if path_style and endpoint:
                 aws_cmd += f" --endpoint-url {endpoint}"
 
@@ -549,18 +549,18 @@ class CRIUExperiment:
                 env={**subprocess.os.environ, **env}
             )
             if upload_ret.returncode == 0:
-                logger.info(f"Uploaded hot-vmas.json to {s3_uri}")
+                logger.info(f"Uploaded hot-iovs.json to {s3_uri}")
             else:
-                logger.warning(f"Failed to upload hot-vmas.json: {upload_ret.stderr.decode()}")
+                logger.warning(f"Failed to upload hot-iovs.json: {upload_ret.stderr.decode()}")
         else:
             # Copy to dump dir on source via SCP (under sudo -u ubuntu -H to use
             # ubuntu's SSH credentials — see AMI-infra-followups.md).
             source_client = self.checkpoint_mgr.get_ssh_client(self.source_host, self.ssh_user)
             cmd = (f"sudo -u {self.ssh_user} -H scp "
                    f"-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "
-                   f"{local_hot_vmas} {self.ssh_user}@{self.source_host}:{self.final_checkpoint_dir}/hot-vmas.json")
+                   f"{local_hot_iovs} {self.ssh_user}@{self.source_host}:{self.final_checkpoint_dir}/hot-iovs.json")
             subprocess.run(cmd, shell=True, capture_output=True, timeout=30)
-            logger.info(f"Copied hot-vmas.json to {self.final_checkpoint_dir} on source")
+            logger.info(f"Copied hot-iovs.json to {self.final_checkpoint_dir} on source")
 
     def _start_workload(self):
         """Start workload process on source node."""

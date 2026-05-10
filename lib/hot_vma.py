@@ -9,7 +9,7 @@ dirty-ratio > theta.
 - theta: dirty ratio threshold (default 0.3)
 - N: consecutive-scan count (default 3)
 
-Produces hot-vmas.json compatible with CRIU's prefetch seeding. Adjacent
+Produces hot-iovs.json compatible with CRIU's prefetch seeding. Adjacent
 hot chunks within the same VMA are coalesced into a single (start, end)
 range so the output file size stays small.
 """
@@ -168,15 +168,19 @@ def extract_hot_chunks(dirty_output_path: str, theta: float = DEFAULT_THETA,
 extract_hot_vmas = extract_hot_chunks
 
 
-def save_hot_vmas_json(hot_vmas: list, output_path: str):
-    """Save hot ranges in CRIU-compatible hot-vmas.json format."""
+def save_hot_iovs_json(hot_iovs: list, output_path: str):
+    """Save hot ranges in CRIU-compatible hot-iovs.json format."""
     output = {
-        "excluded": [{"start": v["start"], "end": v["end"]} for v in hot_vmas],
+        "excluded": [{"start": v["start"], "end": v["end"]} for v in hot_iovs],
         "no_parent": []
     }
     with open(output_path, 'w') as f:
         json.dump(output, f, indent=2)
-    logger.info(f"Saved hot-vmas.json: {output_path} ({len(hot_vmas)} ranges)")
+    logger.info(f"Saved hot-iovs.json: {output_path} ({len(hot_iovs)} ranges)")
+
+
+# Back-compat alias for callers still using the old name.
+save_hot_vmas_json = save_hot_iovs_json
 
 
 def extract_and_save(dirty_output_path: str, dump_dir: str,
@@ -184,9 +188,9 @@ def extract_and_save(dirty_output_path: str, dump_dir: str,
                      consecutive_n: int = DEFAULT_CONSECUTIVE_N) -> str:
     """Extract hot chunks and save to dump directory.
 
-    Returns the path to the written hot-vmas.json.
+    Returns the path to the written hot-iovs.json.
     """
     hot = extract_hot_chunks(dirty_output_path, theta, consecutive_n)
-    out = os.path.join(dump_dir, 'hot-vmas.json')
-    save_hot_vmas_json(hot, out)
+    out = os.path.join(dump_dir, 'hot-iovs.json')
+    save_hot_iovs_json(hot, out)
     return out

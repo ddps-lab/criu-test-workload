@@ -132,8 +132,8 @@ def parse_lazy_pages_log(log_content: str) -> Dict[str, Any]:
         if m:
             metrics['hot_vma']['marked_hot'] = int(m.group(1))
 
-        # No hot-vmas.json
-        if 'No hot-vmas.json found' in line:
+        # No hot-iovs.json
+        if 'No hot-iovs.json found' in line:
             metrics['hot_vma']['available'] = False
 
         # Page cache final stats
