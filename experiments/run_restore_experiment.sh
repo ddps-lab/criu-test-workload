@@ -203,6 +203,30 @@ cleanup() {
 
     sudo rm -rf /tmp/criu_checkpoint /tmp/hsperfdata_ubuntu /tmp/hsperfdata_root 2>/dev/null || true
 
+    # ---- DEBUG (unconditional) ----
+    # Always log to /tmp/cleanup_diag.log so we can spot PID-range issues
+    # without depending on env vars surviving the heredoc.
+    {
+        echo "[diag $(date +%H:%M:%S.%N)] cleanup tick"
+        echo "  dump_pids = [$dump_pids]"
+        echo "  ns_last_pid (pre-bump) = $(cat /proc/sys/kernel/ns_last_pid 2>/dev/null)"
+        if [ -n "$dump_pids" ]; then
+            local _lo=$((min_pid - 50))
+            local _hi=$((max_pid + 100))
+            [ "$_lo" -lt 100 ] && _lo=100
+            echo "  processes in [$_lo, $_hi]:"
+            ps -eo pid,ppid,user,stat,comm,cmd --no-headers 2>/dev/null \
+                | awk -v lo="$_lo" -v hi="$_hi" '$1 >= lo && $1 <= hi'
+            for pid in $dump_pids; do
+                if [ -d "/proc/$pid" ]; then
+                    echo "  /proc/$pid still alive — stat=$(cat /proc/$pid/stat 2>/dev/null | head -c 200)"
+                    echo "  /proc/$pid cmdline=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null)"
+                fi
+            done
+        fi
+        echo "---"
+    } >> /tmp/cleanup_diag.log 2>&1
+
     # Bump next-allocated PID well above the dump's max PID so transient
     # sshd / sudo / journal children spawning between now and the next
     # criu restore don't land in the dump's PID range.
@@ -331,27 +355,50 @@ run_restore() {
         return
     fi
 
-    echo ""
-    echo "--- $mode run $run_num/$REPEAT ($(date +%H:%M:%S)) ---"
+    # Retry up to MAX_ATTEMPTS times on transient PID-collision failures
+    # (criu "Can't fork for X: File exists" — a race between cleanup and
+    # the next clone3 that we can't fully eliminate from the host PID ns).
+    local max_attempts=${MAX_REP_ATTEMPTS:-3}
+    local attempt
+    for attempt in $(seq 1 "$max_attempts"); do
+        echo ""
+        echo "--- $mode run $run_num/$REPEAT attempt $attempt/$max_attempts ($(date +%H:%M:%S)) ---"
 
-    cleanup
+        cleanup
 
-    python3 experiments/baseline_experiment.py \
-        $COMMON \
-        --restore-only \
-        --name "${mode}_run${run_num}" \
-        $args \
-        --no-cleanup \
-        -o "$outfile" 2>"$logfile.err" | tee "$logfile" | grep -E 'COMPLETED|FAILED|Faults|Cache|Daemon|Restore:|ERROR|WARNING' || true
+        python3 experiments/baseline_experiment.py \
+            $COMMON \
+            --restore-only \
+            --name "${mode}_run${run_num}" \
+            $args \
+            --no-cleanup \
+            -o "$outfile" 2>"$logfile.err" | tee "$logfile" | grep -E 'COMPLETED|FAILED|Faults|Cache|Daemon|Restore:|ERROR|WARNING' || true
 
-    # Save CRIU logs
-    if [ -d /tmp/criu_checkpoint/1 ]; then
-        cp /tmp/criu_checkpoint/1/criu-lazy-pages.log "$OUTDIR/${mode}_run${run_num}_lazy.log" 2>/dev/null || true
-        cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/${mode}_run${run_num}_restore.log" 2>/dev/null || true
-    fi
+        # Save CRIU logs
+        if [ -d /tmp/criu_checkpoint/1 ]; then
+            cp /tmp/criu_checkpoint/1/criu-lazy-pages.log "$OUTDIR/${mode}_run${run_num}_lazy.log" 2>/dev/null || true
+            cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/${mode}_run${run_num}_restore.log" 2>/dev/null || true
+        fi
 
-    # Quick health check
-    sudo dmesg | grep segfault | tail -1 2>/dev/null || true
+        # Success criterion: JSON output exists and contains "process_running": true
+        if [ -f "$outfile" ] && grep -q '"process_running": true' "$outfile" 2>/dev/null; then
+            [ "$attempt" -gt 1 ] && echo "  (succeeded on attempt $attempt)"
+            sudo dmesg | grep segfault | tail -1 2>/dev/null || true
+            return 0
+        fi
+
+        # Failure: check whether it's the known PID-collision pattern. If yes, retry.
+        if grep -q "Can't fork for .*: File exists" "$logfile.err" 2>/dev/null; then
+            echo "  attempt $attempt failed (PID collision) — retrying"
+        else
+            # Different failure — don't waste time retrying
+            echo "  attempt $attempt failed (non-PID-collision); abort retries"
+            return 1
+        fi
+    done
+
+    echo "  all $max_attempts attempts failed for $mode run $run_num"
+    return 1
 }
 
 # ============================================================
