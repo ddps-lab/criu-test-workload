@@ -18,7 +18,7 @@
 # Env: REPEAT (default 5), AMI_ID, BUCKET, REGION
 set -e
 
-AMI_ID="${AMI_ID:-ami-0f689eeba0a840177}"  # criu-workload-v9 (chunk_dirty tracker)
+AMI_ID="${AMI_ID:-ami-01317b9faf9a82dd1}"  # criu-workload-v15 (us-west-2)
 INSTANCE_TYPE="m5.8xlarge"
 KEY_NAME="mhsong-ddps-oregon"
 SG="sg-0eb08e8fa10cb3031"
@@ -27,8 +27,8 @@ IAM_PROFILE="mhsong-ec2-admin"
 REGION="us-west-2"
 SSH_KEY="$HOME/.ssh/mhsong-ddps-oregon.pem"
 REPEAT="${REPEAT:-5}"
-BUCKET="${BUCKET:-mhsong-criu-results}"
-CRIU_SRC="${CRIU_SRC:-/spot_kubernetes/criu_build/criu-s3}"
+BUCKET="${BUCKET:-mhsong-criu-data-artifact}"
+RESULTS_BASE="${RESULTS_BASE:-restore-perf}"  # results land at <bucket>/<base>/<workload>/page-server/<ts>/
 WORKLOADS=()
 
 while [[ $# -gt 0 ]]; do
@@ -40,7 +40,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 [ ${#WORKLOADS[@]} -gt 0 ] || { echo "ERROR: provide --all or one or more workloads"; exit 1; }
-[ -x "${CRIU_SRC}/criu/criu" ] || { echo "ERROR: ${CRIU_SRC}/criu/criu not built"; exit 1; }
 
 AWS_KEY=$(aws configure get aws_access_key_id)
 AWS_SECRET=$(aws configure get aws_secret_access_key)
@@ -67,7 +66,6 @@ N=${#WORKLOADS[@]}
 echo "=========================================="
 echo " Page-server ablation: $N workloads, REPEAT=$REPEAT"
 echo " AMI: $AMI_ID"
-echo " criu: ${CRIU_SRC}/criu/criu ($(${CRIU_SRC}/criu/criu --version 2>&1 | grep -i gitid))"
 echo " (each pair = 2 m5.8xlarge instances)"
 for w in "${WORKLOADS[@]}"; do echo "   $w"; done
 echo "=========================================="
@@ -79,7 +77,6 @@ INSTANCE_IDS=$(aws ec2 run-instances \
     --count $TOTAL --key-name $KEY_NAME \
     --security-group-ids $SG --subnet-id $SUBNET \
     --iam-instance-profile Name=$IAM_PROFILE \
-    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":200,"VolumeType":"gp3"}}]' \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=criu-pageserver}]" \
     --query 'Instances[*].InstanceId' --output text)
 
@@ -161,13 +158,8 @@ EOF
     ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$DST_IP "echo '$SRC_PUB' >> ~/.ssh/authorized_keys"
     ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@$SRC_IP "echo '$DST_PUB' >> ~/.ssh/authorized_keys"
 
-    # Sync the workload tree + dev-VM CRIU binary to BOTH sides
-    # (mirrors launch_dump.sh). The page-server fault-stall instrumentation
-    # lives in the dev-VM build, so we install it over the AMI's stock
-    # /usr/local/sbin/criu before each repeat begins.
+    # Sync the workload tree to BOTH sides (rsync pattern from launch_dump.sh).
     for ip in $SRC_IP $DST_IP; do
-        scp -i $SSH_KEY -o StrictHostKeyChecking=no \
-            "${CRIU_SRC}/criu/criu" ubuntu@$ip:/tmp/criu.dev >/dev/null
         rsync -a -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
             --exclude '__pycache__' --exclude '*.pyc' --exclude '.git' \
             /spot_kubernetes/criu_workload/lib \
@@ -186,10 +178,6 @@ set +e
 export AWS_ACCESS_KEY_ID='${AWS_KEY}'
 export AWS_SECRET_ACCESS_KEY='${AWS_SECRET}'
 
-echo "=== install criu (dev binary with page-server stall instrumentation) ==="
-sudo install -m 0755 /tmp/criu.dev /usr/local/sbin/criu
-/usr/local/sbin/criu --version
-
 echo "=== install criu_workload tree (lib workloads experiments config tools) ==="
 for d in lib workloads experiments config tools; do
     if [ -d /tmp/criu_workload_sync/\$d ]; then
@@ -201,12 +189,8 @@ cd /opt/criu_workload
 
 # Mirror the same install on the destination (driver is on source but
 # baseline_experiment.py paramiko-deploys workload code via SFTP; we
-# still want the standalone scripts present on dest). Install the same
-# dev CRIU binary on dst so its lazy-pages daemon emits the matching
-# pageserver: FETCH_DONE log lines.
+# still want the standalone scripts present on dest).
 ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} "
-    sudo install -m 0755 /tmp/criu.dev /usr/local/sbin/criu
-    /usr/local/sbin/criu --version
     sudo rsync -a --chown=ubuntu:ubuntu /tmp/criu_workload_sync/lib/ /opt/criu_workload/lib/
     sudo rsync -a --chown=ubuntu:ubuntu /tmp/criu_workload_sync/workloads/ /opt/criu_workload/workloads/
     sudo rsync -a --chown=ubuntu:ubuntu /tmp/criu_workload_sync/experiments/ /opt/criu_workload/experiments/
@@ -225,30 +209,87 @@ for run in \$(seq 1 ${REPEAT}); do
     echo ""
     echo "--- ${WL} run \$run/${REPEAT} (\$(date +%H:%M:%S)) ---"
 
-    # PID collision fix: source dump records workload PIDs, dest already has
-    # its own SSH/baseline_experiment processes in the ~10000-20000 range
-    # post-bump. If both sides use the same ns_last_pid floor, the dump's
-    # PIDs (e.g. 10324-10343 for matmul) collide with dest's running PIDs
-    # in the same range, manifesting as "Unable to create a thread: -17"
-    # (EEXIST) inside the pie restorer.
+    # ---- Per-rep cleanup (both sides) ----
+    # Source-side: workload script + memcached/redis daemons.
+    # Dest-side: any leftover restored process tree + criu lazy-pages.
     #
-    # Push source workload PIDs to a range way above anything dest uses
-    # (10^6+) so dest can always restore them without preempting its own
-    # processes. Dest stays at the original 10000 floor.
+    # pkill -f is unsafe — it can match this script's own cmdline (when
+    # invoked with --ycsb-* args) and self-kill. Use ps+awk to filter by
+    # the actual comm/cmd values and feed concrete PIDs to kill -9.
+    #
+    # Steps:
+    #   1. Extract any prior-rep dump PIDs from /tmp/criu_checkpoint/1/ on
+    #      both sides so we can later poll those PIDs to be free.
+    #   2. Kill workload processes (standalone wrapper, memcached, redis,
+    #      java/YCSB, criu daemons).
+    #   3. Defensive: explicitly kill anything still occupying the dump's
+    #      PIDs (catches zombies + leaked shells).
+    #   4. Bump ns_last_pid high enough that transient sshd/sudo helpers
+    #      spawning before the next restore land far away from the dump's
+    #      PID range. Source uses 1M+ (workload PIDs will land there for
+    #      the new dump); dest uses 30000+ (well above any typical Phase 1
+    #      dump PID).
+    #   5. Poll /proc on both sides until dump PIDs are free (capped at 20s).
+
+    src_dump_pids=\$(find /tmp/criu_checkpoint -name 'core-*.img' 2>/dev/null \\
+        | sed 's|.*core-||;s|\\.img\$||' | grep -E '^[0-9]+\$' | sort -nu | tr '\\n' ' ')
+    dst_dump_pids=\$(ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} \\
+        "find /tmp/criu_checkpoint -name 'core-*.img' 2>/dev/null \\
+         | sed 's|.*core-||;s|\\.img\$||' | grep -E '^[0-9]+\$' | sort -nu | tr '\\n' ' '" 2>/dev/null)
+
+    # Step 2 — workload kill on both sides (ps+awk, no pkill -f).
+    src_kill() {
+        local pids
+        pids=\$(ps -eo pid,cmd --no-headers 2>/dev/null \\
+            | awk '/python3 .*_standalone\\.py/ && !/sudo|pgrep|grep|awk/ {print \$1}')
+        [ -n "\$pids" ] && sudo kill -9 \$pids 2>/dev/null || true
+        sudo pkill -9 memcached 2>/dev/null || true
+        sudo pkill -9 redis-server 2>/dev/null || true
+        sudo pkill -9 -x java 2>/dev/null || true
+        sudo pkill -9 -x criu 2>/dev/null || true
+    }
+    src_kill
+    ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} "\$(declare -f src_kill); src_kill" 2>/dev/null || true
+
+    # Step 3 — defensive kill of any process on a prior dump PID.
+    for pid in \$src_dump_pids; do
+        [ "\$pid" -lt 100 ] && continue
+        [ "\$pid" -eq "\$\$" ] && continue
+        sudo kill -9 "\$pid" 2>/dev/null || true
+    done
+    if [ -n "\$dst_dump_pids" ]; then
+        ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} \\
+            "for pid in \$dst_dump_pids; do [ \\\"\\\$pid\\\" -lt 100 ] && continue; sudo kill -9 \\\"\\\$pid\\\" 2>/dev/null || true; done" 2>/dev/null || true
+    fi
+
+    sudo rm -rf /tmp/criu_checkpoint 2>/dev/null
+    ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} "sudo rm -rf /tmp/criu_checkpoint" 2>/dev/null || true
+
+    # Step 4 — bump ns_last_pid: source far above (workload PIDs land at
+    # 1M+ for next dump), dest above any plausible workload PID (30000+).
     sudo sh -c 'echo 1000000 > /proc/sys/kernel/ns_last_pid' 2>/dev/null || true
     ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} \\
-        "sudo sh -c 'echo 10000 > /proc/sys/kernel/ns_last_pid'" 2>/dev/null || true
+        "sudo sh -c 'echo 30000 > /proc/sys/kernel/ns_last_pid'" 2>/dev/null || true
 
-    # Cleanup any leftover state from a previous repeat — process tree,
-    # checkpoint dirs, lingering memcached/redis daemons.
-    sudo pkill -9 -f "_standalone\.py|memcached -m|redis-server|criu page-server|criu lazy-pages" 2>/dev/null || true
-    ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} \\
-        "sudo pkill -9 -f '_standalone\.py|memcached -m|redis-server|criu lazy-pages|criu restore'" 2>/dev/null || true
-    sudo rm -rf /tmp/criu_checkpoint 2>/dev/null
-    ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} "sudo rm -rf /tmp/criu_checkpoint" 2>/dev/null
-    sleep 2
+    # Step 5 — wait for dest's dump PIDs to be free (the side that will
+    # claim them on restore). Source-side PIDs are not reclaimed by this
+    # rep's dump (workload starts fresh with high PIDs).
+    if [ -n "\$dst_dump_pids" ]; then
+        ssh -o StrictHostKeyChecking=no ubuntu@${DST_PRIV} bash -c "'
+        for _ in \$(seq 1 20); do
+            any=0
+            for pid in \$dst_dump_pids; do
+                if [ -d /proc/\$pid ]; then any=1; break; fi
+            done
+            [ \"\$any\" -eq 0 ] && break
+            sleep 1
+        done'" 2>/dev/null || true
+    else
+        sleep 2
+    fi
 
     sudo -E python3 -u experiments/baseline_experiment.py \\
+        --config config/experiments/memcached_lazy_prefetch.yaml \\
         --source-ip ${SRC_PRIV} --dest-ip ${DST_PRIV} \\
         --ssh-user ubuntu --workload ${WTYPE} \\
         --lazy-mode live-migration \\
@@ -290,7 +331,7 @@ except Exception as e:
 done
 
 # Upload all artefacts to S3 — single canonical location per (workload, ts).
-S3_DEST="s3://${BUCKET}/pageserver_${WL}_raw/\${TS}/"
+S3_DEST="s3://${BUCKET}/${RESULTS_BASE}/${WL}/page-server/\${TS}/"
 aws s3 sync \$OUTDIR \$S3_DEST --region us-west-2 --quiet
 echo "uploaded → \$S3_DEST"
 

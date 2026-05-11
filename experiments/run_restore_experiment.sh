@@ -122,9 +122,19 @@ MODE_ORDER=(${MODES:-1_baseline_default 1_baseline_crt 3_semi_sync 4_async 5_ful
 # Cleanup function
 # ============================================================
 cleanup() {
+    # Extract the dump's expected PIDs from core-*.img filenames before we
+    # nuke /tmp/criu_checkpoint. These are the PIDs the next restore will
+    # try to claim via clone3(set_tid=...). If any of them is occupied
+    # (live process, zombie, or transient sshd/sudo child) the restore
+    # fails with "Can't fork for X: File exists".
+    local dump_pids=""
+    if [ -d /tmp/criu_checkpoint ]; then
+        dump_pids=$(find /tmp/criu_checkpoint -name 'core-*.img' 2>/dev/null \
+            | sed 's|.*core-||;s|\.img$||' \
+            | grep -E '^[0-9]+$' | sort -nu | tr '\n' ' ')
+    fi
+
     # Kill standalone wrappers FIRST so they don't respawn children.
-    # Use ps+awk and exclude sudo/pgrep/grep/bash to avoid self-killing the
-    # cleanup shell (sudo's own cmdline contains the search pattern).
     local pids
     pids=$(ps -eo pid,cmd --no-headers 2>/dev/null \
         | awk '/python3 .*_standalone\.py/ && !/sudo|pgrep|grep|awk/ {print $1}')
@@ -136,9 +146,6 @@ cleanup() {
     sudo pkill -9 -x java 2>/dev/null || true
     sudo pkill -9 -x criu 2>/dev/null || true
     # Catch YCSB java children and redis/memcached clients by cmdline.
-    # IMPORTANT: `pkill -f` matches the caller's own cmdline when the
-    # script was invoked with "--ycsb-*" args. Exclude self by using
-    # ps+awk with process name filtering instead of pkill -f.
     local extra_pids
     extra_pids=$(ps -eo pid,comm,args --no-headers 2>/dev/null \
         | awk '$2 == "java" && /ycsb|YCSB|com\.yahoo/ {print $1}
@@ -147,13 +154,90 @@ cleanup() {
     if [ -n "$extra_pids" ]; then
         sudo kill -9 $extra_pids 2>/dev/null || true
     fi
+
+    # Defensive kill: any process currently sitting on a PID the dump
+    # plans to reclaim. Skip kernel low PIDs (<100) and our own shell.
+    # Then range-kill: any ubuntu-owned process in the dump's [min,max]
+    # PID range (catches transient sshd-session / sudo / journal helpers
+    # that landed in the range despite the ns_last_pid bump).
+    if [ -n "$dump_pids" ]; then
+        for pid in $dump_pids; do
+            [ "$pid" -lt 100 ] && continue
+            [ "$pid" -eq "$$" ] && continue
+            [ "$pid" -eq "$PPID" ] && continue
+            sudo kill -9 "$pid" 2>/dev/null || true
+        done
+
+        local min_pid max_pid
+        min_pid=$(echo "$dump_pids" | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -n | head -1)
+        max_pid=$(echo "$dump_pids" | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -n | tail -1)
+        if [ -n "$min_pid" ] && [ -n "$max_pid" ]; then
+            local lo=$((min_pid - 50))
+            local hi=$((max_pid + 100))
+            [ "$lo" -lt 100 ] && lo=100
+            # Kill ANY process (ubuntu or root) in [lo, hi] whose PID lies
+            # in the dump's range. Exclude only:
+            #   - PID 1 (init)
+            #   - sshd / sshd-session / systemd-* (would break ssh / system)
+            #   - kernel threads (comm in brackets, e.g. [kworker]) — sudo
+            #     kill returns silently anyway, but we skip to keep noise low
+            #   - script's own shell tree ($$, $PPID, and parents up to init)
+            local self_chain=""
+            local p=$$
+            while [ "$p" -gt 1 ] 2>/dev/null; do
+                self_chain="$self_chain $p"
+                p=$(awk '{print $4}' /proc/$p/stat 2>/dev/null) || break
+            done
+            ps -eo pid,comm --no-headers 2>/dev/null | \
+                awk -v lo="$lo" -v hi="$hi" -v skip="$self_chain" '
+                    BEGIN { n = split(skip, sk, " "); for (i = 1; i <= n; i++) S[sk[i]] = 1 }
+                    $1 >= lo && $1 <= hi \
+                    && !(S[$1]) \
+                    && $2 != "sshd" && $2 != "sshd-session" \
+                    && $2 !~ /^systemd/ \
+                    && $2 !~ /^\[/ \
+                    {print $1}' | \
+                while read kp; do sudo kill -9 "$kp" 2>/dev/null || true; done
+        fi
+    fi
+
     sudo rm -rf /tmp/criu_checkpoint /tmp/hsperfdata_ubuntu /tmp/hsperfdata_root 2>/dev/null || true
-    # Give kernel time to reap zombies and free PIDs.
-    sleep 5
-    # Bump next-allocated PID so cleanup's own sudo children don't land
-    # in the restore target range (~1800-2500), which caused "Can't fork
-    # for X: File exists" failures on redis lazy modes.
-    sudo sh -c 'echo 20000 > /proc/sys/kernel/ns_last_pid' 2>/dev/null || true
+
+    # Bump next-allocated PID well above the dump's max PID so transient
+    # sshd / sudo / journal children spawning between now and the next
+    # criu restore don't land in the dump's PID range.
+    sudo sh -c 'echo 30000 > /proc/sys/kernel/ns_last_pid' 2>/dev/null || true
+
+    # Poll /proc until every dump PID is free. Caps at 20 s — exits early
+    # if all clear; otherwise proceeds anyway after the timeout.
+    if [ -n "$dump_pids" ]; then
+        for _ in $(seq 1 20); do
+            local any_alive=0
+            for pid in $dump_pids; do
+                if [ -d "/proc/$pid" ]; then
+                    any_alive=1
+                    break
+                fi
+            done
+            [ "$any_alive" -eq 0 ] && break
+            sleep 1
+        done
+    else
+        sleep 5  # no dump-pids list (first iteration) — fall back to fixed wait
+    fi
+
+    # Wait until every workload/criu process name is gone. Zombies waiting
+    # for init's wait() can briefly hold PIDs in the dump's range; this loop
+    # checks pgrep until the names report nothing. Capped at 15 s.
+    for _ in $(seq 1 15); do
+        local still=$(pgrep -x criu 2>/dev/null; pgrep -x memcached 2>/dev/null; pgrep -x redis-server 2>/dev/null; pgrep -x java 2>/dev/null)
+        [ -z "$still" ] && break
+        sleep 1
+    done
+
+    # Re-bump after the wait in case the kernel allocated PIDs during the
+    # poll loop (unlikely once dump processes are reaped).
+    sudo sh -c 'echo 30000 > /proc/sys/kernel/ns_last_pid' 2>/dev/null || true
 }
 
 # ============================================================
