@@ -545,8 +545,15 @@ echo "Done. Results in $OUTDIR and s3://$S3_RESULTS_BUCKET/$RESULTS_PREFIX/"
 # Auto-terminate instance if --auto-terminate was set
 # ============================================================
 if [ "$AUTO_TERMINATE" -eq 1 ]; then
-    INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $(curl -s -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')" \
+    # IMDSv2 lookup. Region must be derived from instance metadata (NOT
+    # $S3_REGION) because cross-region runs have the dst instance in a
+    # different region from the dump bucket.
+    IMDS_TOKEN=$(curl -s -X PUT 'http://169.254.169.254/latest/api/token' \
+        -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')
+    INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
         http://169.254.169.254/latest/meta-data/instance-id)
-    echo "Auto-terminating instance $INSTANCE_ID..."
-    aws ec2 terminate-instances --instance-ids $INSTANCE_ID --region $S3_REGION
+    INSTANCE_REGION=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+        http://169.254.169.254/latest/meta-data/placement/region)
+    echo "Auto-terminating instance $INSTANCE_ID in region $INSTANCE_REGION..."
+    aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$INSTANCE_REGION"
 fi
