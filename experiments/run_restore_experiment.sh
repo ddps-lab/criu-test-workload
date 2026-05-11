@@ -338,8 +338,95 @@ json.dump({
 " 2>/dev/null
 
     # Save logs
-    cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/${mode_name}_run${run_num}_restore.log" 2>/dev/null || true
+    # criu-restore.log is root-owned (criu runs via sudo). Use sudo cp +
+    # chown so the later `aws s3 sync` (ubuntu) can read it.
+    sudo cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/${mode_name}_run${run_num}_restore.log" 2>/dev/null || true
+    sudo chown "$(id -u):$(id -g)" "$OUTDIR/${mode_name}_run${run_num}_restore.log" 2>/dev/null || true
     echo "  Total: $((dl_ms + r_ms))ms"
+}
+
+## Strace-based progress watcher.
+##
+## When STRACE_PROGRESS_S is set (seconds), spawns a watcher that polls
+## for the workload wrapper PID, attaches `strace -e trace=write` once
+## CRIU restore has resumed the process, then records every stdout write
+## for STRACE_PROGRESS_S seconds. The log is saved alongside the regular
+## per-rep artefacts ({mode}_run{N}_strace.log) and uploaded with them.
+##
+## Designed to span the lazy-pages daemon drain (for 5_full) so the
+## paper can show how much progress Ours makes while baseline is still
+## downloading.
+WORKLOAD_PROC_NAME_DEFAULT="${WORKLOAD}_standalone.py"
+WORKLOAD_PROC_NAME="${WORKLOAD_PROC_NAME:-$WORKLOAD_PROC_NAME_DEFAULT}"
+
+start_strace_watcher() {
+    [ -z "${STRACE_PROGRESS_S:-}" ] && return
+    local mode=$1 run_num=$2
+    local strace_log="$OUTDIR/${mode}_run${run_num}_strace.log"
+    local watcher_log="$OUTDIR/${mode}_run${run_num}_strace_watcher.log"
+    (
+        # Wait up to 90s for the wrapper to appear; lazy-prefetch + cross-
+        # region restore on large workloads can easily take 60s before the
+        # wrapper PID is visible.
+        local deadline=$(( $(date +%s) + 90 ))
+        local wpid=""
+        local criu_log="/tmp/criu_checkpoint/1/criu-restore.log"
+        while [ "$(date +%s)" -lt "$deadline" ]; do
+            # pgrep -f matches anything mentioning the script name in its
+            # full cmdline — that includes the `bash -c "... python3 …"`
+            # launcher (which sleeps forever waiting on the backgrounded
+            # python). Filter to the python interpreter via /proc/<pid>/comm
+            # so strace attaches to the wrapper, not the launcher.
+            for cand in $(pgrep -f "$WORKLOAD_PROC_NAME" 2>/dev/null); do
+                local comm
+                comm=$(cat "/proc/${cand}/comm" 2>/dev/null || true)
+                case "$comm" in
+                    python|python3) wpid="$cand"; break ;;
+                esac
+            done
+            # Additionally wait for CRIU to finish parasite cleanup —
+            # otherwise strace attaches mid-restore and traces the
+            # transient parasite thread which gets SIGKILL'd as CRIU
+            # cleans up. "Tasks resumed" in criu-restore.log is the
+            # canonical "restore done, process is now in user code" mark.
+            if [ -n "$wpid" ] && [ -f "$criu_log" ] && \
+               sudo grep -q "Tasks resumed" "$criu_log" 2>/dev/null; then
+                break
+            fi
+            wpid=""
+            sleep 0.5
+        done
+        if [ -z "$wpid" ]; then
+            echo "$(date +%s.%N) WARN no resumed $WORKLOAD_PROC_NAME within 90s" >> "$watcher_log"
+            exit 0
+        fi
+        echo "$(date +%s.%N) attached_pid=$wpid duration=${STRACE_PROGRESS_S}s" >> "$watcher_log"
+        # Use `timeout` so strace self-terminates and flushes its output
+        # cleanly. SIGINT to a backgrounded `sudo strace &` only kills sudo
+        # — strace stays attached, its buffer never flushes, and the -o
+        # file remains empty. timeout 300 strace → strace exits via SIGTERM
+        # on its own, fsync'ing the log.
+        # -e trace=write -e write=1,2 — filter to stdout/stderr fd writes
+        # only (massively cuts noise from internal pipes/sockets). -tt is
+        # short option for microsecond wallclock timestamps (NOT --tt).
+        sudo timeout "${STRACE_PROGRESS_S}" \
+            strace -e trace=write -e write=1,2 -f -p "$wpid" -tt -s 4096 \
+            -o "$strace_log" \
+            2>"${strace_log}.err" || true
+        # strace wrote as root; chown + chmod so the ubuntu user's
+        # aws s3 sync can pick the file up.
+        sudo chown "$(id -u):$(id -g)" "$strace_log" "${strace_log}.err" 2>/dev/null || true
+        sudo chmod a+r "$strace_log" "${strace_log}.err" 2>/dev/null || true
+        echo "$(date +%s.%N) detached size=$(stat -c %s "$strace_log" 2>/dev/null || echo missing)" >> "$watcher_log"
+    ) &
+    STRACE_WATCHER_PID=$!
+}
+
+wait_strace_watcher() {
+    [ -z "${STRACE_PROGRESS_S:-}" ] && return
+    [ -z "${STRACE_WATCHER_PID:-}" ] && return
+    wait "$STRACE_WATCHER_PID" 2>/dev/null || true
+    STRACE_WATCHER_PID=""
 }
 
 run_restore() {
@@ -351,9 +438,17 @@ run_restore() {
 
     # Baseline is handled separately
     if [ "$args" = "BASELINE_SPECIAL" ]; then
+        start_strace_watcher "$mode" "$run_num"
         run_baseline "$mode" "$run_num"
+        wait_strace_watcher
         return
     fi
+
+    # Spawn strace watcher in parallel with the restore — it will pgrep
+    # for the wrapper PID once CRIU resumes it, then capture writes for
+    # STRACE_PROGRESS_S seconds. Done in a sub-shell so retries don't
+    # double-attach.
+    start_strace_watcher "$mode" "$run_num"
 
     # Retry up to MAX_ATTEMPTS times on transient PID-collision failures
     # (criu "Can't fork for X: File exists" — a race between cleanup and
@@ -376,14 +471,16 @@ run_restore() {
 
         # Save CRIU logs
         if [ -d /tmp/criu_checkpoint/1 ]; then
-            cp /tmp/criu_checkpoint/1/criu-lazy-pages.log "$OUTDIR/${mode}_run${run_num}_lazy.log" 2>/dev/null || true
-            cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/${mode}_run${run_num}_restore.log" 2>/dev/null || true
+            sudo cp /tmp/criu_checkpoint/1/criu-lazy-pages.log "$OUTDIR/${mode}_run${run_num}_lazy.log" 2>/dev/null || true
+            sudo cp /tmp/criu_checkpoint/1/criu-restore.log "$OUTDIR/${mode}_run${run_num}_restore.log" 2>/dev/null || true
+            sudo chown "$(id -u):$(id -g)" "$OUTDIR/${mode}_run${run_num}_lazy.log" "$OUTDIR/${mode}_run${run_num}_restore.log" 2>/dev/null || true
         fi
 
         # Success criterion: JSON output exists and contains "process_running": true
         if [ -f "$outfile" ] && grep -q '"process_running": true' "$outfile" 2>/dev/null; then
             [ "$attempt" -gt 1 ] && echo "  (succeeded on attempt $attempt)"
             sudo dmesg | grep segfault | tail -1 2>/dev/null || true
+            wait_strace_watcher
             return 0
         fi
 
@@ -393,11 +490,13 @@ run_restore() {
         else
             # Different failure — don't waste time retrying
             echo "  attempt $attempt failed (non-PID-collision); abort retries"
+            wait_strace_watcher
             return 1
         fi
     done
 
     echo "  all $max_attempts attempts failed for $mode run $run_num"
+    wait_strace_watcher
     return 1
 }
 
